@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>voxbox conformance runner</title>
+<style>
+ body{background:#111;color:#ddd;font:14px/1.5 monospace;padding:2em}
+ #s{white-space:pre-wrap}
+ .ok{color:#6f6}.err{color:#f66}
+</style>
+</head>
+<body>
+<h3>voxbox conformance runner (wasmoon / Lua 5.4)</h3>
+<div id="s">booting…</div>
+<script src="/vendor/wasmoon/dist/index.js"></script>
+<script>
+const S = document.getElementById('s');
+const log = (m, cls) => {
+  const d = document.createElement('div');
+  d.textContent = m;
+  if (cls) d.className = cls;
+  S.appendChild(d);
+};
+
+async function main() {
+  S.textContent = '';
+  const params = new URLSearchParams(location.search);
+  const FRAMES = parseInt(params.get('frames') || '1500', 10);
+  const SEED = parseInt(params.get('seed') || '7', 10);
+  const CHUNK = 100;   // frames per trace flush/POST (matches trace_run.py)
+
+  const factory = new wasmoon.LuaFactory('/vendor/wasmoon/dist/glue.wasm');
+  const lua = await factory.createEngine();
+  const ver = await lua.doString('return _VERSION');
+  log(`lua: ${ver}`);
+
+  const [shim, cart, driver] = await Promise.all(
+    ['/shim/picovox.lua', '/cart', '/shim/driver.lua']
+      .map(u => fetch(u).then(r => r.text())));
+
+  await lua.doString(shim);
+  await lua.doString(cart);
+  await lua.doString(driver);
+  await lua.doString(`srand(${SEED}) _init()`);
+  log(`cart loaded, running ${FRAMES} frames…`);
+
+  await fetch('/trace/reset', { method: 'POST' });
+
+  let luaMs = 0;
+  for (let f = 1; f <= FRAMES; f += CHUNK) {
+    const hi = Math.min(f + CHUNK - 1, FRAMES);
+    const t0 = performance.now();
+    await lua.doString(`run_frames(${f},${hi})`);
+    const chunk = await lua.doString('return trace_flush()');
+    luaMs += performance.now() - t0;
+    await fetch('/trace', { method: 'POST', body: chunk });
+    if (hi % 500 === 0 || hi === FRAMES) log(`  frame ${hi}/${FRAMES}`);
+  }
+
+  const mode = await lua.doString('return mode');
+  const perFrame = (luaMs / FRAMES).toFixed(3);
+  const status = `frames=${FRAMES} mode=${mode} lua_ms_per_frame=${perFrame}`;
+  await fetch('/trace/done', { method: 'POST', body: status });
+  log(`DONE  ${status}`, 'ok');
+  document.title = 'voxbox: done';
+}
+
+main().catch(async e => {
+  log(`ERROR: ${e.message || e}`, 'err');
+  log(e.stack || '', 'err');
+  await fetch('/trace/done', { method: 'POST', body: `ERROR ${e.message || e}` });
+  document.title = 'voxbox: error';
+});
+</script>
+</body>
+</html>

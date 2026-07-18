@@ -1,0 +1,92 @@
+{
+  "_format": {
+    "sfx": "speed = frames per step (step lasts speed/120 s). steps = [pitch, wave, vol, fx]. pitch: PICO-8 units, 33 = A4 = 440 Hz. vol 0-7. fx: none|slide|vib|drop|fadein|fadeout",
+    "music": "bpm + spb (steps per beat). seq tokens: note name (c3, f#2), '.' hold, '-' rest. waves: tri tsaw saw sqr pulse organ noise phaser kick snare",
+    "determinism": "noise uses Park-Miller LCG seed 1234 in both the numpy and JS renderers"
+  },
+
+  "sfx": {
+    "shoot":  {"speed": 2, "steps": [[52,"pulse",6],[49,"pulse",6,"slide"],[46,"pulse",5,"slide"],[42,"pulse",4,"slide"],[38,"pulse",2,"fadeout"]]},
+    "eshoot": {"speed": 2, "steps": [[45,"sqr",5],[42,"sqr",5,"slide"],[39,"sqr",4,"slide"],[36,"sqr",3,"slide"],[33,"sqr",2,"fadeout"],[30,"sqr",1,"fadeout"]]},
+    "boom":   {"speed": 4, "steps": [[30,"noise",7],[27,"noise",7,"drop"],[24,"noise",6,"drop"],[21,"noise",5,"drop"],[18,"noise",4,"fadeout"],[15,"noise",3,"fadeout"],[12,"noise",2,"fadeout"],[10,"noise",1,"fadeout"]]},
+    "bigboom":{"speed": 6, "steps": [[26,"noise",7],[24,"noise",7,"drop"],[21,"noise",7,"drop"],[18,"noise",6,"drop"],[15,"noise",6,"drop"],[13,"noise",5,"fadeout"],[11,"noise",4,"fadeout"],[9,"noise",3,"fadeout"],[7,"noise",2,"fadeout"],[6,"noise",1,"fadeout"],[5,"noise",1,"fadeout"]]},
+    "rescue": {"speed": 3, "steps": [[36,"tri",5],[40,"tri",5],[43,"tri",6],[48,"tri",6],[52,"tri",5,"fadeout"],[55,"tri",3,"fadeout"]]},
+    "deliver":{"speed": 4, "steps": [[36,"organ",5],[41,"organ",5],[43,"organ",6],[48,"organ",6],[48,"organ",6],[48,"organ",4,"fadeout"]]},
+    "warp":   {"speed": 3, "steps": [[30,"phaser",4],[32,"phaser",5,"vib"],[34,"phaser",5,"vib"],[36,"phaser",6,"vib"],[38,"phaser",6,"vib"],[40,"phaser",6,"vib"],[42,"phaser",5,"vib"],[44,"phaser",4,"vib"],[46,"phaser",3,"fadeout"],[48,"phaser",2,"fadeout"]]},
+    "bomb":   {"speed": 6, "steps": [[40,"noise",7],[36,"noise",7,"drop"],[32,"noise",7,"drop"],[28,"noise",6,"drop"],[24,"noise",6,"drop"],[20,"noise",5,"drop"],[16,"noise",5,"drop"],[13,"noise",4,"drop"],[10,"noise",3,"fadeout"],[8,"noise",2,"fadeout"],[6,"noise",2,"fadeout"],[5,"noise",1,"fadeout"],[4,"noise",1,"fadeout"],[3,"noise",1,"fadeout"]]},
+    "mine":   {"speed": 2, "steps": [[50,"tsaw",5],[50,"tsaw",4],[47,"tsaw",2,"fadeout"]]},
+    "alarm":  {"speed": 5, "steps": [[40,"sqr",5],[40,"sqr",5],[47,"sqr",5],[47,"sqr",5],[40,"sqr",5],[40,"sqr",5],[47,"sqr",5],[47,"sqr",4,"fadeout"]]},
+    "hurt":   {"speed": 3, "steps": [[38,"saw",6],[35,"saw",6,"drop"],[32,"saw",5,"drop"],[30,"saw",5,"drop"],[28,"saw",4,"drop"],[27,"saw",3,"fadeout"],[26,"saw",2,"fadeout"],[26,"saw",1,"fadeout"],[26,"saw",1,"fadeout"]]},
+    "mutate": {"speed": 4, "steps": [[30,"pulse",4],[32,"pulse",4,"vib"],[34,"pulse",5,"vib"],[35,"pulse",5,"vib"],[37,"pulse",5,"vib"],[38,"pulse",6,"vib"],[40,"pulse",6,"vib"],[41,"pulse",6,"vib"],[42,"pulse",5,"vib"],[42,"pulse",4,"vib"],[42,"pulse",3,"fadeout"],[42,"pulse",2,"fadeout"]]},
+    "clear":  {"speed": 5, "steps": [[36,"organ",5],[40,"organ",5],[43,"organ",5],[47,"organ",6],[48,"organ",6],[52,"organ",6],[55,"organ",6],[60,"organ",7],[60,"organ",6],[60,"organ",5],[60,"organ",4,"fadeout"],[60,"organ",3,"fadeout"],[60,"organ",2,"fadeout"],[60,"organ",1,"fadeout"]]},
+    "ui":     {"speed": 1, "steps": [[46,"tri",4],[46,"tri",4],[48,"tri",3],[48,"tri",2,"fadeout"]]},
+    "1up":    {"speed": 4, "steps": [[36,"sqr",5],[40,"sqr",5],[43,"sqr",5],[48,"sqr",6],[43,"sqr",5],[48,"sqr",6],[52,"sqr",6],[55,"sqr",7],[55,"sqr",5],[55,"sqr",4,"fadeout"],[55,"sqr",2,"fadeout"]]}
+  },
+
+  "music": {
+    "title": {
+      "bpm": 84, "spb": 2, "loop": true,
+      "channels": [
+        {"wave": "organ", "vol": 4, "seq": "a2 . c3 . e3 . a3 . g3 . e3 . c3 . e3 . f2 . a2 . c3 . f3 . e3 . c3 . a2 . c3 . a2 . c3 . e3 . a3 . b3 . e3 . g3 . e3 . e2 . g2 . b2 . e3 . g3 . b3 . g3 . e3 ."},
+        {"wave": "tri",   "vol": 5, "seq": "a1 . . . . . . . . . . . . . . . f1 . . . . . . . . . . . . . . . a1 . . . . . . . . . . . . . . . e1 . . . . . . . . . . . . . . ."},
+        {"wave": "pulse", "vol": 2, "seq": "- - - - e4 . - - - - - - c4 . - - - - - - a4 . - - - - - - f4 . - - - - - - e4 . - - - - - - b4 . - - - - - - g4 . - - e4 . - - b3 . - -"}
+      ]
+    },
+    "music1": {
+      "bpm": 112, "spb": 4, "loop": true,
+      "channels": [
+        {"wave": "saw",   "vol": 5, "seq": "c2 . c2 . g1 . c2 . c2 . c2 . g1 . c2 . a1 . a1 . e1 . a1 . f1 . f1 . c1 . g1 . c2 . c2 . g1 . c2 . c2 . c2 . g1 . c2 . a1 . a1 . e1 . a1 . f1 . g1 . b1 . g1 ."},
+        {"wave": "pulse", "vol": 4, "seq": "c4 . e4 . g4 . e4 . d4 . f4 . a4 . f4 . e4 . c4 . a3 . c4 . f3 . a3 . c4 . e4 . c4 . e4 . g4 . e4 . d4 . f4 . a4 . b4 . c5 . g4 . e4 . c4 . d4 . e4 . d4 . b3 ."},
+        {"wave": "organ", "vol": 2, "seq": "e3 . . . . . . . f3 . . . . . . . e3 . . . . . . . f3 . . . . . . . e3 . . . . . . . f3 . . . . . . . e3 . . . . . . . d3 . . . . . . ."},
+        {"wave": "kick",  "vol": 6, "seq": "c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - c2 -"},
+        {"wave": "snare", "vol": 3, "seq": "- - - - - - c3 - - - - - - - c3 - - - - - - - c3 - - - - - - - c3 - - - - - - - c3 - - - - - - - c3 - - - - - - - c3 - - - - - - c3 - c3 -"}
+      ]
+    },
+    "music2": {
+      "bpm": 124, "spb": 4, "loop": true,
+      "channels": [
+        {"wave": "saw",   "vol": 5, "seq": "d2 . d2 . a1 . d2 . d2 . d2 . a1 . d2 . bb1 . bb1 . f1 . bb1 . a1 . a1 . e1 . a1 . d2 . d2 . a1 . d2 . d2 . d2 . a1 . d2 . g1 . g1 . d1 . g1 . a1 . a1 . c#2 . a1 ."},
+        {"wave": "pulse", "vol": 4, "seq": "d4 . f4 . a4 . f4 . e4 . d4 . c#4 . d4 . f4 . g4 . a4 . g4 . f4 . e4 . d4 . e4 . f4 . a4 . d5 . a4 . g4 . f4 . e4 . f4 . g4 . bb4 . a4 . g4 . f4 . e4 . c#4 . e4 ."},
+        {"wave": "organ", "vol": 2, "seq": "f3 . . . . . . . f3 . . . . . . . g3 . . . . . . . e3 . . . . . . . f3 . . . . . . . f3 . . . . . . . g3 . . . . . . . a3 . . . . . . ."},
+        {"wave": "kick",  "vol": 6, "seq": "c2 - - - c2 - - - c2 - - - c2 - c2 - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - c2 - c2 - - - c2 - - - c2 - - - c2 - - -"},
+        {"wave": "snare", "vol": 3, "seq": "- - - - c3 - - - - - - - c3 - - c3 - - - - c3 - - - - - - - c3 - - - - - - - c3 - - - - - - - c3 - - c3 - - - - c3 - - - - - - - c3 - c3 c3"}
+      ]
+    },
+    "music3": {
+      "bpm": 132, "spb": 4, "loop": true,
+      "channels": [
+        {"wave": "saw",   "vol": 6, "seq": "e2 . e2 . e2 . f2 . e2 . e2 . d2 . e2 . e2 . e2 . e2 . f2 . g2 . f2 . e2 . d2 . e2 . e2 . e2 . f2 . e2 . e2 . d2 . e2 . c2 . c2 . d2 . d2 . b1 . b1 . e2 . e2 ."},
+        {"wave": "pulse", "vol": 4, "seq": "e4 . g4 . e4 . f4 . e4 . d4 . b3 . d4 . e4 . g4 . b4 . a4 . g4 . f4 . e4 . d4 . e4 . e5 . b4 . c5 . b4 . g4 . e4 . g4 . a4 . g4 . f4 . a4 . g4 . f4 . e4 . b3 ."},
+        {"wave": "phaser","vol": 2, "seq": "e3 . . . . . . . f3 . . . . . . . e3 . . . . . . . d3 . . . . . . . e3 . . . . . . . f3 . . . . . . . c3 . . . . . . . b2 . . . . . . ."},
+        {"wave": "kick",  "vol": 7, "seq": "c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - c2 - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - - - c2 - c2 - c2 - c2 -"},
+        {"wave": "snare", "vol": 4, "seq": "- - - - c3 - - - - - - - c3 - - - - - - - c3 - - - - - - - c3 - c3 - - - - - c3 - - - - - - - c3 - - - - - - - c3 - - - - c3 - c3 - c3 c3 c3"}
+      ]
+    },
+    "jingle": {
+      "bpm": 120, "spb": 2, "loop": false,
+      "channels": [
+        {"wave": "organ", "vol": 5, "seq": "c4 e4 g4 c5 . . e5 . c5 . . ."},
+        {"wave": "tri",   "vol": 5, "seq": "c2 . g2 c3 . . c3 . c2 . . ."},
+        {"wave": "pulse", "vol": 3, "seq": "- - - e4 g4 . g4 . e4 . . ."}
+      ]
+    },
+    "gameover": {
+      "bpm": 72, "spb": 2, "loop": false,
+      "channels": [
+        {"wave": "tri",   "vol": 5, "seq": "a3 . g3 . f3 . e3 . . . eb3 . d3 . . . a2 . . . . . . ."},
+        {"wave": "saw",   "vol": 3, "seq": "a1 . . . f1 . . . d1 . . . e1 . . . a0 . . . . . . ."},
+        {"wave": "organ", "vol": 2, "seq": "- - - - c3 . - - a2 . - - g#2 . - - e2 . . . . . . ."}
+      ]
+    },
+    "victory": {
+      "bpm": 116, "spb": 2, "loop": false,
+      "channels": [
+        {"wave": "pulse", "vol": 5, "seq": "c4 c4 c4 e4 g4 . c5 . . b4 c5 d5 c5 . . . . . . ."},
+        {"wave": "organ", "vol": 4, "seq": "e3 e3 e3 g3 c4 . e4 . . f4 e4 f4 e4 . . . . . . ."},
+        {"wave": "tri",   "vol": 5, "seq": "c2 . c2 . e2 . g2 . . g1 a1 b1 c2 . . . . . . ."},
+        {"wave": "kick",  "vol": 6, "seq": "c2 - c2 - c2 - c2 - - c2 - c2 c2 - - - - - - -"},
+        {"wave": "snare", "vol": 3, "seq": "- - - - c3 - - c3 - - c3 - c3 - - - - - - -"}
+      ]
+    }
+  }
+}
