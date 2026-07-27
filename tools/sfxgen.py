@@ -234,9 +234,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--wavs", metavar="DIR", help="render all sounds to WAVs")
     ap.add_argument("--stats", action="store_true")
+    ap.add_argument("--spec", metavar="FILE", default=SPEC_PATH,
+                    help="pack to render (default: audio/sfx.json). Point this "
+                         "at a pack exported from the browser to listen to "
+                         "auto-generated sounds on the desktop.")
     args = ap.parse_args()
 
-    bank = render_all(load_spec())
+    bank = render_all(load_spec(args.spec))
     if args.wavs:
         os.makedirs(args.wavs, exist_ok=True)
         for name, samples in bank.items():

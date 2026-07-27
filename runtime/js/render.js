@@ -5,7 +5,22 @@
 // straight-down drop shadows on the ground, volume floating in black.
 // The volume uploads as an R8UI 3D texture (value = paletteIndex+1, 0=empty)
 // and a fragment-shader DDA walks it front-to-back.
-import { VW, VD, VH, GROUND_Z } from './volume.js';
+import { VW, VD, VH } from './volume.js';
+
+// Ground policy. The plane is re-derived every frame, so a mode that flips
+// between two candidates would make the shadows pop.
+//
+// A flat settling window is the wrong tool though: a cart changing scene (a
+// title screen to a level) genuinely moves its ground, and half a second of
+// shadows cast on the old plane is very visible. So confidence decides — a
+// plane that dominates the occupied columns is unambiguous and adopted at
+// once, and only a marginal reading has to hold for SETTLE frames. Below
+// MIN_COVERAGE there is no credible ground at all, and no shadows beat shadows
+// cast onto an arbitrary plane.
+const GROUND_SETTLE = 8;
+const MIN_COVERAGE = 0.25;
+const SURE_COVERAGE = 0.5;
+const NO_GROUND = 1e6;   // past the volume, so the shader's receiver test never fires
 
 // PICO-8 palette
 const PAL = [
@@ -127,7 +142,7 @@ export class Renderer {
 
     gl.uniform1i(this.u('uVol'), 0);
     gl.uniform1i(this.u('uShadow'), 1);
-    gl.uniform1f(this.u('uGroundZ'), GROUND_Z);
+    this.setGround(opts.ground);
     const pal = new Float32Array(48);
     PAL.forEach((c, i) => {
       pal[i * 3] = (c >> 16) / 255;
@@ -165,8 +180,45 @@ export class Renderer {
     gl.uniform2f(this.u('uHalfTan'), ht * aspect, ht);
   }
 
+  // policy: {mode:'auto'} (default, derive per frame), {mode:'fixed', z}, or
+  // {mode:'off'} to disable drop shadows entirely
+  setGround(policy) {
+    this.ground = policy || { mode: 'auto' };
+    this.groundZ = this.ground.mode === 'fixed' ? this.ground.z : NO_GROUND;
+    this.groundSettled = this.ground.mode !== 'auto';
+    this.candidate = NaN;
+    this.candidateFor = 0;
+  }
+
+  resolveGround(volume) {
+    const g = this.ground;
+    if (g.mode === 'off') return NO_GROUND;
+    if (g.mode === 'fixed') return g.z;
+    const p = volume.groundPlane();
+    // z=0 is the top of the volume, so nothing can ever be above it to cast:
+    // treat it as no ground rather than blurring a map that is always empty
+    const z = p && p.coverage >= MIN_COVERAGE && p.z > 0 ? p.z : NO_GROUND;
+    if (z === this.groundZ) { this.candidateFor = 0; return this.groundZ; }
+    // adopt the first reading outright too, or shadows fade in over the
+    // settling window every time a cart loads
+    if (!this.groundSettled || (z !== NO_GROUND && p.coverage >= SURE_COVERAGE)) {
+      this.groundSettled = true;
+      this.groundZ = z;
+      this.candidateFor = 0;
+      return z;
+    }
+    if (z === this.candidate) {
+      if (++this.candidateFor >= GROUND_SETTLE) { this.groundZ = z; this.candidateFor = 0; }
+    } else {
+      this.candidate = z; this.candidateFor = 1;
+    }
+    return this.groundZ;
+  }
+
   frame(volume) {
     const gl = this.gl;
+    const groundZ = this.resolveGround(volume);
+    gl.uniform1f(this.u('uGroundZ'), groundZ);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_3D, this.volTex);
     gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0, VW, VD, VH,
@@ -174,7 +226,7 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.shadowTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, VW, VD,
-                     gl.RED, gl.UNSIGNED_BYTE, volume.buildShadow());
+                     gl.RED, gl.UNSIGNED_BYTE, volume.buildShadow(groundZ));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }

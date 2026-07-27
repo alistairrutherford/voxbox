@@ -36,14 +36,29 @@ def main():
     lua = LuaRuntime(unpack_returned_tuples=True)
     print(f"lua: {lua.lua_implementation}", file=sys.stderr)
 
-    lua.execute(read(os.path.join(VOXBOX, "shim", "picovox.lua")))
-    lua.execute(read(args.cart))
-    lua.execute(read(os.path.join(VOXBOX, "shim", "driver.lua")))
+    def shim(name):
+        return read(os.path.join(VOXBOX, "shim", name))
 
-    lua.execute(f"srand({args.seed}) _init()")
+    # no host API here: the shim's own trace recorders are the implementation
+    for f in ("picovox.lua", "api.lua", "sandbox.lua"):
+        lua.execute(shim(f))
+    real, stubbed = lua.globals().vb_build()
+    print(f"api coverage: {real}/{real + stubbed} implemented", file=sys.stderr)
 
-    run = lua.globals().run_frames
+    # cart and driver share one sandbox env, so the driver can drive the cart
+    load = lua.globals().vb_load
+    for src, name in ((read(args.cart), "cart"), (shim("driver.lua"), "driver")):
+        err = load(src, name)
+        if err:
+            sys.exit(f"{name}: {err}")
+
+    lua.execute(f'srand({args.seed}) vb_call("_init")')
+
+    call = lua.globals().vb_call
     flush = lua.globals().trace_flush
+
+    def run(a, b):
+        call("run_frames", a, b)
     with open(args.out, "w") as out:
         f = 1
         while f <= args.frames:
@@ -53,7 +68,7 @@ def main():
             out.write("\n")
             f = hi + 1
 
-    mode = lua.eval("mode")
+    mode = lua.eval('vb_get("mode")')
     print(f"wrote {args.out}: {args.frames} frames, final mode={mode!r}",
           file=sys.stderr)
 

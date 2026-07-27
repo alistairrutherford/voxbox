@@ -38,11 +38,92 @@ Browser Voxatron-style engine for `iso-defender` (see
   Skipped as unnecessary: Canvas2D fallback (per plan §8), dirty-region
   texture uploads (whole pipeline is ~0.1 ms/frame), GIF capture.
 
+### Generic-cart work (see [../VOXBOX_GENERIC_PLAN.md](../VOXBOX_GENERIC_PLAN.md))
+
+- **Phase 1 — done.** The cart now runs in a sandboxed `_ENV` built from an API
+  manifest (`shim/api.lua`), not the raw Lua globals: no `io`/`os`/`require`/
+  `package`/`load`/`debug`, and no `math.random`. Manifest names with no
+  implementation become *recording stubs* — `void` ones degrade honestly
+  (nothing drawn/played), `value` ones are flagged red in the new **api** panel
+  because their return value is a lie the cart consumes. Names outside the
+  manifest stay `nil` and keep ordinary Lua semantics; when one is called, the
+  host pulls the name out of the Lua error and offers "stub & restart". The
+  PICO-8 stdlib is filled in (`sgn` `count` `foreach` `sub` `split` `tonum`
+  `ord` `chr` bit ops `time` `printh` `deli` `btn` `btnp`), and `pairs` no
+  longer raises on table or boolean keys. Verified: the 4000-frame trace is
+  still bit-identical to the pre-refactor oracle on both hosts.
+
+- **Phase 2 — done.** Carts are swappable at runtime. `host.js` is now a
+  persistent *shell* (renderer, volume, input, audio bank, fixed-step loop,
+  panel) plus a disposable *session* (Lua state, sandbox, entrypoints, saves),
+  so loading a cart disposes the old state outright rather than unwinding
+  globals. Sources: drag/drop a `.lua` file **or a folder** (walked
+  recursively, sorted by filename per the `01_`…`09_` convention, with ▲▼
+  overrides), the `load .lua…` picker, `?cart=<url>`, or the built-in `/cart`.
+  Entrypoints are probed, not assumed — `_update60` switches the loop to 60 Hz
+  and a missing `_draw` is tolerated. A cart error halts the loop and shows the
+  traceback; an undeclared global is queued and **stub & restart** reloads the
+  cart in place. Saved state and the queued-stub list are namespaced by a cart
+  hash, so one cart cannot read or clobber another's.
+
+- **Phase 3 — done (cart identity + persistence).** Storage is namespaced by a
+  SHA-256 of the cart sources (FNV-1a fallback outside a secure context), with
+  migration through both older key schemes so no existing save is orphaned.
+  `cartdata`/`dget`/`dset` are real: 64 numeric slots over `localStorage`,
+  keyed on the `cartdata()` id string as PICO-8 does — so two carts sharing an
+  id share a save — and a cart that never calls `cartdata()` still gets an
+  implicit store keyed on its own hash. The `hiscore`/`unlocked` poking is gone
+  from engine code; a `<cart>.voxbox.json` sidecar now declares `name`,
+  `camera`, `sfx` and `persistGlobals` (`["score"]` restores as saved,
+  `{"hiscore":"max"}` never restores downward), and
+  [builtin.voxbox.json](builtin.voxbox.json) is what keeps the reference cart's
+  behaviour without any iso-defender specifics in the host. Saves also flush on
+  cart swap and on `pagehide`/`visibilitychange`, since browsers throttle
+  timers to roughly once a minute in a backgrounded tab.
+
+- **Phase 5 — done (geometry + camera).** The last cart constant is gone.
+  128×128×64 stays (it is the platform), but `GROUND_Z` is no longer declared
+  anywhere: the shadow plane is **derived** from the volume each frame as the
+  mode of the per-column topmost voxel, guarded by how much of the scene that
+  plane accounts for. On the reference cart it lands on z=50 — the same value
+  `01_config.lua` uses — and follows the title screen's own floor at z=58.
+  A plane that dominates is adopted at once (a cart changing scene genuinely
+  moves its ground); a marginal one has to hold for 8 frames. Below 25%
+  coverage, or at z=0 where nothing could cast, there are simply no shadows.
+  `"groundZ": 50` pins it and `"groundZ": false` disables it, with `?ground=`
+  to match. The shell camera now frames the whole volume for an unknown cart;
+  iso-defender's tighter framing lives in its manifest, not in engine code.
+
+- **Phase 4 — done (audio for an unknown cart).** In a real Voxatron cart the
+  sounds live in the `.vx.png` resource tree, not the Lua — given a `.lua` file
+  the audio data simply isn't in the input. But Voxatron looks audio up *by
+  name* and a missing name is silence, not an error, so the engine gets to
+  decide what a name means. The pipeline is now `name → spec → PCM`, resolved
+  in three steps: the cart's **authored** pack, else a spec **generated** from
+  the name, else **silent**. `runtime/js/sfxgen.js` picks an archetype from a
+  keyword lexicon (`shoot|laser|pew` → pulse downslide, `boom|explo|die` →
+  noise drop, …) and seeds variation within it from a hash of the name, so
+  `boom` and `bigboom` differ and both are identical on every run. Numeric
+  PICO-8-style ids (`sfx(3)`) hash the same way. Packs are per-cart: a dropped
+  `.json`, `?sfx=<url>`, `<cart>.sfx.json` beside the cart, or the built-in
+  pack. Music defaults to silent (`?automusic=1` opts in) because generated
+  loops grate far more readily than generated one-shots. The generator emits
+  *specs*, never PCM, so **export sfx.json** hands you an editable pack —
+  `python3 tools/sfxgen.py --spec exported.json --wavs out/` renders it — and
+  auto-synth becomes the first draft of authoring rather than a dead end. The
+  audio panel colours every name by origin.
+
 ## Playing
 
 ```sh
 python3 voxbox/app.py     # then open http://localhost:8080/
 ```
+
+Drop a `.lua` cart (or a folder of them, optionally with an `sfx.json`) on the
+page to run something else; `?cart=<url>` loads one by URL. With no cart
+specified the built-in `iso-defender` runs. Unknown sound names auto-synthesise
+(`?autosfx=0` to silence them); unknown music stays silent unless
+`?automusic=1`.
 
 Arrows/WASD fly, X fires, Z/C smart bomb, hold Down+Z warp.
 P pauses (N steps one frame while paused), M mutes music.
@@ -55,10 +136,14 @@ Gamepads use the standard mapping; touch controls appear on touch devices
 
 ```
 shim/picovox.lua      canonical API shim + trace recorder (single source of truth)
+shim/api.lua          API manifest: allowlist + per-name stub policy
+shim/sandbox.lua      cart environment builder + lenient recording stubs
 shim/driver.lua       deterministic scripted input session
+runtime/js/sfxgen.js  sound name -> sfx.json spec (keyword archetypes + name hash)
 tools/trace_run.py    Python oracle: lupa + shim + cart -> trace_py.txt
 tools/conform.py      trace differ (first divergence + op-count drift)
 app.py                flask dev server (localhost:8080)
+builtin.voxbox.json   per-cart manifest for the built-in cart (/cart.voxbox.json)
 runtime/conform.html  browser conformance runner (streams trace to flask)
 runtime/vendor/wasmoon/   vendored wasmoon 1.16.0 (index.js + glue.wasm)
 ```

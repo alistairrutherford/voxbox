@@ -169,10 +169,3 @@ export function renderMusic(spec) {
   for (let i = 0; i < n; i++) out[i] = Math.tanh(mix[i] * 0.8) * 0.9;
   return out;
 }
-
-export function renderBank(spec) {
-  const bank = new Map();
-  for (const [name, s] of Object.entries(spec.sfx)) bank.set(name, { pcm: renderSfx(s), loop: false });
-  for (const [name, s] of Object.entries(spec.music)) bank.set(name, { pcm: renderMusic(s), loop: !!s.loop });
-  return bank;
-}

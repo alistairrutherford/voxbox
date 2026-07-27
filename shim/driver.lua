@@ -23,6 +23,7 @@ function step_frame(f)
  local keys=keys_for(f)
  if keys then for i=1,#keys do btn_state[keys[i]]=1 end end
  trace_mark("F "..f)
+ _tick()          -- advances btnp edge state + time(); emits no trace output
  _update()
  _draw()
 end

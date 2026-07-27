@@ -47,6 +47,12 @@ def shim(p):
                                mimetype="text/plain")
 
 
+@app.get("/cart.voxbox.json")
+def cart_manifest():
+    """Per-cart manifest for the built-in cart (camera, persisted globals)."""
+    return send_from_directory(VOXBOX, "builtin.voxbox.json")
+
+
 @app.get("/cart")
 def cart():
     """Serve the combined cart, re-running build.sh if any src/ file is newer."""

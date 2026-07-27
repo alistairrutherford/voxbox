@@ -7,7 +7,6 @@
 import { FONT, ADVANCE } from './font.js';
 
 export const VW = 128, VD = 128, VH = 64;
-export const GROUND_Z = 50;
 const XY = VW * VD;
 
 export class Volume {
@@ -156,9 +155,35 @@ export class Volume {
     }
   }
 
+  // ---- ground plane ------------------------------------------------------
+  // Where the ground is was never a platform constant — iso-defender happens
+  // to put it at z=50 and another cart will not, so it is derived rather than
+  // declared. In a Voxatron-style scene the ground is the flat slab that most
+  // columns' topmost voxel belongs to, so the *mode* of minZ is the plane.
+  // `coverage` (its share of occupied columns) is how the caller tells a real
+  // ground slab apart from a cart that is just floating objects in the void.
+  groundPlane() {
+    const { minZ } = this;
+    const hist = new Int32Array(VH);
+    let occupied = 0;
+    for (let i = 0; i < XY; i++) {
+      const z = minZ[i];
+      if (z >= VH) continue;              // 255 = empty column
+      hist[z]++; occupied++;
+    }
+    if (!occupied) return null;
+    let best = 0;
+    for (let z = 1; z < VH; z++) if (hist[z] > hist[best]) best = z;
+    return { z: best, coverage: hist[best] / occupied };
+  }
+
   // ---- drop shadow map: blurred column occupancy above ground ------------
-  buildShadow() {
+  // A groundZ at or past the volume floor means "no ground": nothing can
+  // receive a shadow, so skip the blur entirely rather than computing a map
+  // the shader will ignore.
+  buildShadow(groundZ) {
     const { minZ, shadow } = this;
+    if (!(groundZ < VH)) { shadow.fill(0); return shadow; }
     for (let y = 0; y < VD; y++) {
       const row = y * VW;
       for (let x = 0; x < VW; x++) {
@@ -170,7 +195,7 @@ export class Volume {
           for (let dx = -1; dx <= 1; dx++) {
             const xx = x + dx;
             if (xx < 0 || xx >= VW) continue;
-            if (minZ[rr + xx] < GROUND_Z) sum++;
+            if (minZ[rr + xx] < groundZ) sum++;
           }
         }
         shadow[row + x] = (sum * 255 / 9) | 0;

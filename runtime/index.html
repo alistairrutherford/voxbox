@@ -9,16 +9,35 @@
       align-items:center;justify-content:center;gap:10px;padding:8px;box-sizing:border-box}
  #screen{background:#000;image-rendering:pixelated;outline:1px solid #222;
          width:100%;max-width:960px;height:auto;aspect-ratio:4/3}
- #panel{display:flex;gap:24px;color:#777;max-width:960px;width:100%}
+ #panel{display:flex;flex-wrap:wrap;gap:12px 24px;color:#777;max-width:960px;width:100%}
+ #panel section{min-width:150px}
  #panel h3{color:#bbb;margin:0 0 4px;font-size:12px}
  #panel section{margin-bottom:0}
- #sounds div{color:#585}
- #sounds div.hot{color:#8f8}
- #sounds div.miss{color:#a55}
- #sounds span{color:#464}
- #sounds .mus{color:#78a}
+ /* sound origin: authored = hand-tuned pack, generated = synthesised from the
+    name, silent = nothing resolved (which is what Voxatron itself does) */
+ #sounds div.authored{color:#585}
+ #sounds div.generated{color:#77a}
+ #sounds div.silent{color:#a55}
+ #sounds div.hot{filter:brightness(1.7)}
+ #sounds span{color:#555}
+ #sounds .mus{border-bottom:1px solid #222;margin-bottom:2px;padding-bottom:2px}
+ /* api monitor: void stubs only lose visuals/audio; value stubs return a
+    made-up number the cart consumes, so the game is actually wrong */
+ #api div.void{color:#a83}
+ #api div.value{color:#d55}
+ #api div.undecl{color:#d55;font-weight:bold}
+ #api span{color:#655}
  #error{display:none;position:fixed;left:12px;bottom:12px;right:12px;
-        background:#300;color:#f88;padding:10px;white-space:pre-wrap}
+        background:#300;color:#f88;padding:10px;white-space:pre-wrap;
+        max-height:40vh;overflow:auto;z-index:10}
+ #cartname{color:#9a9}
+ #files div{color:#777}
+ #files button{padding:0 5px;margin:0 0 0 3px}
+ #files button:disabled{color:#444;border-color:#222;cursor:default}
+ #drop{display:none;position:fixed;inset:0;z-index:20;
+       background:#000c;border:3px dashed #575;
+       align-items:center;justify-content:center;color:#9d9;font-size:16px}
+ body.dragging #drop{display:flex}
  kbd{color:#aaa}
  button{background:#1a1a1a;color:#9a9;border:1px solid #333;
         font:12px monospace;padding:3px 10px;cursor:pointer;margin:2px 4px 2px 0}
@@ -42,6 +61,13 @@
 <canvas id="screen" width="960" height="720"></canvas>
 <div id="panel">
  <section><h3>voxbox</h3><div id="status">booting…</div><div id="stats"></div></section>
+ <section><h3>cart</h3>
+  <div id="cartname">—</div>
+  <div id="files"></div>
+  <button id="load">load .lua…</button>
+  <input id="file" type="file" accept=".lua" multiple hidden>
+  <div style="color:#666">or drop a file or folder</div>
+ </section>
  <section><h3>controls</h3>
   <div><kbd>arrows/wasd</kbd> fly · <kbd>x</kbd> fire</div>
   <div><kbd>z</kbd>/<kbd>c</kbd> bomb · <kbd>down+z</kbd> warp</div>
@@ -51,7 +77,17 @@
  <section><h3>audio</h3>
   <div style="color:#666">press any key to enable</div>
   <button id="mute">music: on</button>
+  <button id="exportsfx">export sfx.json</button>
+  <div style="color:#666">
+   <span style="color:#585">authored</span> ·
+   <span style="color:#77a">generated</span> ·
+   <span style="color:#a55">silent</span>
+  </div>
   <div id="sounds"></div>
+ </section>
+ <section><h3>api</h3>
+  <div id="api"></div>
+  <button id="restub" style="display:none">stub &amp; restart</button>
  </section>
  <section><h3>tools</h3>
   <button id="shot">screenshot</button>
@@ -59,6 +95,7 @@
  </section>
 </div>
 <div id="error"></div>
+<div id="drop">drop a .lua cart, or a folder of them</div>
 <div id="touch">
  <div class="tb" id="t-l" data-b="0">◀</div>
  <div class="tb" id="t-r" data-b="1">▶</div>

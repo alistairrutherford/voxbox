@@ -34,14 +34,23 @@ async function main() {
   const ver = await lua.doString('return _VERSION');
   log(`lua: ${ver}`);
 
-  const [shim, cart, driver] = await Promise.all(
-    ['/shim/picovox.lua', '/cart', '/shim/driver.lua']
-      .map(u => fetch(u).then(r => r.text())));
+  const [shim, manifest, sandbox, cart, driver] = await Promise.all(
+    ['/shim/picovox.lua', '/shim/api.lua', '/shim/sandbox.lua',
+     '/cart', '/shim/driver.lua'].map(u => fetch(u).then(r => r.text())));
 
+  // no JS host API here: the shim's own trace recorders are the implementation
   await lua.doString(shim);
-  await lua.doString(cart);
-  await lua.doString(driver);
-  await lua.doString(`srand(${SEED}) _init()`);
+  await lua.doString(manifest);
+  await lua.doString(sandbox);
+  log(`api coverage: ${await lua.doString('local r,s = vb_build() return r.."/"..(r+s)')}`);
+
+  // cart and driver share one sandbox env, so the driver can drive the cart
+  for (const [src, name] of [[cart, 'cart'], [driver, 'driver']]) {
+    lua.global.set('__src', src);
+    const err = await lua.doString(`local e = vb_load(__src, "${name}") __src=nil return e`);
+    if (err) throw new Error(`${name}: ${err}`);
+  }
+  await lua.doString(`srand(${SEED}) vb_call("_init")`);
   log(`cart loaded, running ${FRAMES} frames…`);
 
   await fetch('/trace/reset', { method: 'POST' });
@@ -50,14 +59,14 @@ async function main() {
   for (let f = 1; f <= FRAMES; f += CHUNK) {
     const hi = Math.min(f + CHUNK - 1, FRAMES);
     const t0 = performance.now();
-    await lua.doString(`run_frames(${f},${hi})`);
+    await lua.doString(`vb_call("run_frames",${f},${hi})`);
     const chunk = await lua.doString('return trace_flush()');
     luaMs += performance.now() - t0;
     await fetch('/trace', { method: 'POST', body: chunk });
     if (hi % 500 === 0 || hi === FRAMES) log(`  frame ${hi}/${FRAMES}`);
   }
 
-  const mode = await lua.doString('return mode');
+  const mode = await lua.doString('return vb_get("mode")');
   const perFrame = (luaMs / FRAMES).toFixed(3);
   const status = `frames=${FRAMES} mode=${mode} lua_ms_per_frame=${perFrame}`;
   await fetch('/trace/done', { method: 'POST', body: status });
