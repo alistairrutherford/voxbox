@@ -1560,7 +1560,7 @@ end
 function clear_draw()
  world_draw()
  particles_draw()
- boxfill(20,0,14,108,2,40,C_BLK)
+ boxfill(20,0,14,108,1,40,C_BLK)
  hud_line(20,14,108,14,C_YEL)
  hud_print("level "..nstr(level_no).." clear!",34,18,(frame%20<10) and C_YEL or C_GRN)
  local surv=colonists_alive()
@@ -1575,7 +1575,7 @@ end
 function over_draw()
  world_draw()
  particles_draw()
- boxfill(20,0,14,108,2,40,C_BLK)
+ boxfill(20,0,14,108,1,40,C_BLK)
  hud_print("game over",46,20,(frame%20<10) and C_RED or C_ORG)
  hud_print("score "..score_str(score),40,28,C_WHT)
  if score>=hiscore and score>0 then hud_print("new best!",46,34,C_YEL) end

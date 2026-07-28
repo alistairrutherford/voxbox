@@ -1,4 +1,4 @@
-# voxbox
+# voxbox — development notes
 
 A browser runtime for pure-Lua Voxatron cartridges. Hand it a `.lua` cart and
 it loads, runs and makes noise. Self-contained: everything it needs is in this
@@ -39,7 +39,7 @@ repository.
   Skipped as unnecessary: Canvas2D fallback (per plan §8), dirty-region
   texture uploads (whole pipeline is ~0.1 ms/frame), GIF capture.
 
-### Generic-cart work (see [docs/VOXBOX_GENERIC_PLAN.md](docs/VOXBOX_GENERIC_PLAN.md))
+### Generic-cart work (see [VOXBOX_GENERIC_PLAN.md](VOXBOX_GENERIC_PLAN.md))
 
 - **Phase 1 — done.** The cart now runs in a sandboxed `_ENV` built from an API
   manifest (`shim/api.lua`), not the raw Lua globals: no `io`/`os`/`require`/
@@ -77,7 +77,7 @@ repository.
   from engine code; a `<cart>.voxbox.json` sidecar now declares `name`,
   `camera`, `sfx` and `persistGlobals` (`["score"]` restores as saved,
   `{"hiscore":"max"}` never restores downward), and
-  [carts/voxel_defender.voxbox.json](carts/voxel_defender.voxbox.json) is what keeps the reference cart's
+  [carts/voxel_defender.voxbox.json](../carts/voxel_defender.voxbox.json) is what keeps the reference cart's
   behaviour without any iso-defender specifics in the host. Saves also flush on
   cart swap and on `pagehide`/`visibilitychange`, since browsers throttle
   timers to roughly once a minute in a backgrounded tab.
@@ -127,7 +127,7 @@ is chosen. From there:
 - **load .lua file(s)…** — one file or several (loaded in filename order)
 - **load folder…** — a whole directory, sidecars included
 - **play iso-defender** — the reference cart
-- **play galaxian** — a bundled Galaxian clone ([carts/galaxian.lua](carts/galaxian.lua)),
+- **play galaxian** — a bundled Galaxian clone ([carts/galaxian.lua](../carts/galaxian.lua)),
   written in pure Voxatron Lua as a worked example of a cart the engine did not
   grow up around: swaying formation, diving attackers, waves, and a hiscore
   stored through `cartdata`/`dget`/`dset`. All of its audio is auto-synthesised
