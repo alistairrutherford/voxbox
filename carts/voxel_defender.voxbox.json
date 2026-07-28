@@ -1,7 +1,7 @@
 {
   "_comment": "Per-cart manifest for the bundled iso-defender cart, picked up from the <cart>.voxbox.json sidecar convention. This is what keeps engine code free of iso-defender specifics: anything the host would otherwise hardcode about one cart lives here as data.",
 
-  "name": "iso-defender (bundled)",
+  "name": "voxel defender (bundled)",
 
   "_sfx": "Points at the authored pack rather than duplicating it into carts/, because audio/sfx.json is also the authoring source tools/sfxgen.py renders from.",
   "sfx": "/sfx.json",

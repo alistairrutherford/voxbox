@@ -1,0 +1,24 @@
+{
+  "_comment": "Per-cart manifest for the bundled isometric-shooter homage, picked up from the <cart>.voxbox.json sidecar convention.",
+
+  "name": "zaxxon (bundled)",
+
+  "controls": [
+    ["left / right", "steer"],
+    ["up / down", "climb / dive"],
+    ["x", "fire"],
+    "watch your shadow to judge height",
+    "shoot fuel drums before the tank runs dry"
+  ],
+
+  "_camera": "Swung round to the classic isometric three-quarter view rather than looking straight down the deck: about 38 degrees of azimuth and 34 of elevation. The scroll axis then runs diagonally across the screen and both the deck's near side and its flank are visible, which is what gives the genre its look. Elevation still has to be high enough that the ship separates from its shadow.",
+  "camera": {
+    "pos": [168, 219, -67],
+    "target": [64, 66, 44],
+    "fov": 46
+  },
+
+  "_groundZ": "Left to auto-derivation. It lands on the deck at z=52 during fortress zones, and correctly finds no ground at all during the space zones — so the ship's shadow disappears exactly when there is nothing to cast it onto.",
+
+  "_persistGlobals": "None needed: the hiscore goes through cartdata/dget/dset."
+}

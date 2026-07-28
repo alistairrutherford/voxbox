@@ -12,7 +12,7 @@ WebAssembly Lua 5.4 VM, and raymarches the result on the GPU with per-face
 shading and drop shadows. The screen above is live — that idle slab is the real
 renderer, running before any cart is loaded.
 
-It is **self-contained**: clone it, run it, and both bundled games work.
+It is **self-contained**: clone it, run it, and all three bundled games work.
 
 ---
 
@@ -33,7 +33,7 @@ renderer.
 
 ## The bundled games
 
-Two carts ship with voxbox, both written in pure Voxatron Lua.
+Three carts ship with voxbox, all written in pure Voxatron Lua.
 
 ### Voxel Defender
 
@@ -61,6 +61,22 @@ back to rejoin. Waves get more aggressive; the hiscore is saved through
 
 Every sound it makes is **synthesised from the sound's name** — no audio was
 authored for it at all. See [Sound](#sound) below.
+
+### zaxxon
+
+An isometric-shooter homage where **altitude is the whole game**. A fortress
+deck scrolls toward you; you hold station near the front and fly across and up
+and down, threading the gaps in walls or clearing them over the top, shooting
+turrets and enemy planes, and blasting fuel drums before the tank runs dry.
+Zones cycle fortress → open space → fortress → a boss robot with a core you
+have to line up on, then repeat, harder.
+
+It leans on something the engine gives away for free: **your ship's drop shadow
+slides along the deck underneath you, and that shadow is the altitude gauge** —
+the way the genre always intended it to be read. There is a ladder on the back
+wall too, but the shadow is the one you actually fly by. In the space zones
+there is no deck, so the engine finds no ground plane and the shadow correctly
+disappears.
 
 ---
 
