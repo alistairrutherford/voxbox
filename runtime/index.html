@@ -7,8 +7,30 @@
  body{background:#000;color:#888;font:12px/1.5 monospace;margin:0;
       display:flex;flex-direction:column;min-height:100vh;
       align-items:center;justify-content:center;gap:10px;padding:8px;box-sizing:border-box}
+ #stage{position:relative;width:100%;max-width:960px}
  #screen{background:#000;image-rendering:pixelated;outline:1px solid #222;
-         width:100%;max-width:960px;height:auto;aspect-ratio:4/3}
+         display:block;width:100%;height:auto;aspect-ratio:4/3}
+ /* Launcher sits over the idle iso view rather than replacing it, so the
+    renderer is visibly alive before any cart is loaded. Only the card is
+    darkened — a full-canvas scrim would hide the very thing it sits on. */
+ /* Top-aligned: the camera leaves the upper part of the frame empty, so the
+    card lives there and the whole slab stays visible underneath it. */
+ #launcher{display:none;position:absolute;inset:0;z-index:4;
+           flex-direction:column;align-items:center;justify-content:flex-start;
+           padding:3% 16px;box-sizing:border-box}
+ body.no-cart #launcher{display:flex}
+ #launcher .card{display:flex;flex-direction:column;align-items:center;gap:9px;
+                 text-align:center;padding:18px 26px;border:1px solid #2c3a2c;
+                 border-radius:4px;background:#080c08ee;max-width:30em}
+ #launcher h1{color:#9c9;font-size:28px;letter-spacing:3px;margin:0}
+ #launcher p{color:#7a7a7a;margin:0}
+ #launcher .hint{color:#606060;font-size:11px;margin-top:2px}
+ #launcher code{color:#7a8a7a}
+ #launcher .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+ #launcher button{font-size:13px;padding:8px 16px;background:#141814;
+                  border-color:#3a4a3a;color:#adb}
+ #launcher button:hover{border-color:#6a6;background:#1b241b}
+ #launcher button.alt{color:#899;border-color:#333}
  #panel{display:flex;flex-wrap:wrap;gap:12px 24px;color:#777;max-width:960px;width:100%}
  #panel section{min-width:150px}
  #panel h3{color:#bbb;margin:0 0 4px;font-size:12px}
@@ -46,6 +68,8 @@
  #touch{display:none;position:fixed;left:0;right:0;bottom:0;top:0;
         pointer-events:none;z-index:5}
  body.touch-on #touch{display:block}
+ /* touch pads sit above the launcher, so keep them out of its way */
+ body.no-cart #touch{display:none}
  .tb{position:absolute;width:56px;height:56px;border-radius:12px;
      background:#222c;color:#9a9;border:1px solid #444;
      display:flex;align-items:center;justify-content:center;
@@ -58,14 +82,36 @@
 </style>
 </head>
 <body>
-<canvas id="screen" width="960" height="720"></canvas>
+<div id="stage">
+ <canvas id="screen" width="960" height="720"></canvas>
+ <div id="launcher">
+  <div class="card">
+   <h1>voxbox</h1>
+   <p>a browser runtime for pure-Lua Voxatron cartridges</p>
+   <div class="row">
+    <button id="pick-files">load .lua file(s)…</button>
+    <button id="pick-folder">load folder…</button>
+   </div>
+   <button id="pick-builtin" class="alt">play iso-defender (built-in)</button>
+   <p class="hint">or drop a .lua file, several, or a whole folder anywhere on
+    this page. A folder may also carry <code>sfx.json</code> and
+    <code>&lt;cart&gt;.voxbox.json</code> alongside the Lua.</p>
+  </div>
+ </div>
+</div>
 <div id="panel">
  <section><h3>voxbox</h3><div id="status">booting…</div><div id="stats"></div></section>
  <section><h3>cart</h3>
   <div id="cartname">—</div>
   <div id="files"></div>
   <button id="load">load .lua…</button>
+  <button id="loadfolder">load folder…</button>
+  <button id="eject">eject</button>
   <input id="file" type="file" accept=".lua" multiple hidden>
+  <!-- webkitdirectory is what makes a folder pickable from a dialog; without
+       it a folder can only arrive by drag and drop. No accept filter: the
+       folder may legitimately contain sfx/manifest json too. -->
+  <input id="folder" type="file" webkitdirectory multiple hidden>
   <div style="color:#666">or drop a file or folder</div>
  </section>
  <section><h3>controls</h3>

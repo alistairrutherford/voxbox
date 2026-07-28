@@ -119,11 +119,20 @@ Browser Voxatron-style engine for `iso-defender` (see
 python3 voxbox/app.py     # then open http://localhost:8080/
 ```
 
-Drop a `.lua` cart (or a folder of them, optionally with an `sfx.json`) on the
-page to run something else; `?cart=<url>` loads one by URL. With no cart
-specified the built-in `iso-defender` runs. Unknown sound names auto-synthesise
-(`?autosfx=0` to silence them); unknown music stays silent unless
-`?automusic=1`.
+It opens on a **launcher** over an empty idle scene — a real slab rendered
+through the real pipeline, so the renderer is visibly working before any cart
+is chosen. From there:
+
+- **load .lua file(s)…** — one file or several (loaded in filename order)
+- **load folder…** — a whole directory, sidecars included
+- **play iso-defender (built-in)** — the reference cart
+- or drop a file, several, or a folder anywhere on the page
+
+The same three buttons live in the **cart** panel while a cart is running, with
+**eject** to return to the launcher. `?cart=<url>` skips the launcher and boots
+straight in — `?cart=/cart` restores the old behaviour of going directly into
+`iso-defender`. Unknown sound names auto-synthesise (`?autosfx=0` to silence
+them); unknown music stays silent unless `?automusic=1`.
 
 Arrows/WASD fly, X fires, Z/C smart bomb, hold Down+Z warp.
 P pauses (N steps one frame while paused), M mutes music.

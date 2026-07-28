@@ -462,6 +462,7 @@ async function boot() {
         showError({ message: err });
         status('load failed');
         try { lua.global.close(); } catch { /* ignore */ }
+        showLauncher();   // the error stays up; the user can pick another cart
         return;
       }
     }
@@ -505,6 +506,7 @@ async function boot() {
 
     acc = 0; last = performance.now();
     session = s;
+    hideLauncher();
     status('running');
   }
 
@@ -552,17 +554,83 @@ async function boot() {
 
   const openCart = async (make) => {
     try { await loadCart(await make()); }
-    catch (e) { showError(e); status('load failed'); }
+    catch (e) { showError(e); status('load failed'); showLauncher(); }
   };
 
-  $('#file').addEventListener('change', (e) => {
-    const files = [...e.target.files].map((f) => ({
-      path: f.webkitRelativePath || f.name, file: f,
-    }));
-    if (files.length) openCart(() => cartFromFiles(files));
-    e.target.value = '';
-  });
-  $('#load').addEventListener('click', () => $('#file').click());
+  // ---- launcher + idle scene -------------------------------------------
+  // With no cart loaded the volume would just be black, which reads as broken.
+  // Draw an empty Voxatron-style scene instead: a real slab through the real
+  // renderer, so the drop shadow under the hovering cube is proof the pipeline
+  // works before a cart is ever chosen.
+  const IDLE_GROUND = 52;
+  function drawIdle(t) {
+    vol.clv();
+    vol.boxfill(0, 0, IDLE_GROUND, 127, 127, 63, 5);          // slab body
+    vol.boxfill(0, 0, IDLE_GROUND, 127, 127, IDLE_GROUND, 6); // slab top
+    for (let y = 0; y < 128; y += 16) {                       // checker tiles
+      for (let x = 0; x < 128; x += 16) {
+        if (((x + y) / 16) % 2 === 0) {
+          vol.boxfill(x, y, IDLE_GROUND, x + 15, y + 15, IDLE_GROUND, 13);
+        }
+      }
+    }
+    // Placed off-centre: the launcher card sits over the middle of the view,
+    // so anything centred here would be hidden behind it. No voxel caption —
+    // the HTML heading already says it, and better.
+    const bob = (p) => Math.round(Math.sin(t / 900 + p) * 4);
+    const cube = (cx, cy, cz, c) =>
+      vol.boxfill(cx - 6, cy - 6, cz, cx + 6, cy + 6, cz + 12, c);
+    cube(26, 30, 32 + bob(0), 12);
+    cube(102, 24, 28 + bob(2), 8);
+    cube(64, 106, 34 + bob(4), 10);
+  }
+
+  let idleAt = 0;
+  function showLauncher() {
+    document.body.classList.add('no-cart');
+    status('no cart loaded');
+    renderer.setCamera(CAM);
+    renderer.setGround({ mode: 'auto' });
+    idleAt = 0;                     // force a redraw on the next frame
+  }
+  const hideLauncher = () => document.body.classList.remove('no-cart');
+
+  // Returning to the launcher is a full teardown, same as loading another cart,
+  // so nothing of the old cart survives into the next one.
+  function eject() {
+    persist();
+    const old = session;
+    session = null;
+    if (old) { try { old.lua.global.close(); } catch { /* already closed */ } }
+    cart = null;
+    bank.stopMusic();
+    mon.reset();
+    clearError();
+    setPaused(false);
+    showCart();
+    showLauncher();
+  }
+
+  // one handler for both inputs: the folder one just arrives with
+  // webkitRelativePath set, which is also what gives the load order its paths
+  for (const id of ['#file', '#folder']) {
+    $(id).addEventListener('change', (e) => {
+      const files = [...e.target.files].map((f) => ({
+        path: f.webkitRelativePath || f.name, file: f,
+      }));
+      if (files.length) openCart(() => cartFromFiles(files));
+      e.target.value = '';
+    });
+  }
+  const pickFiles = () => $('#file').click();
+  const pickFolder = () => $('#folder').click();
+  const playBuiltin = () => openCart(() => cartFromUrl(BUILTIN));
+  $('#load').addEventListener('click', pickFiles);
+  $('#loadfolder').addEventListener('click', pickFolder);
+  $('#eject').addEventListener('click', eject);
+  $('#pick-files').addEventListener('click', pickFiles);
+  $('#pick-folder').addEventListener('click', pickFolder);
+  $('#pick-builtin').addEventListener('click', playBuiltin);
 
   addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -655,7 +723,9 @@ async function boot() {
   });
   $('#pause').addEventListener('click', () => setPaused(!paused));
   // reloads the cart in place rather than the page, so a dropped cart survives
-  $('#restub').addEventListener('click', () => loadCart(cart).catch(showError));
+  $('#restub').addEventListener('click', () => {
+    if (cart) loadCart(cart).catch(showError);
+  });
 
   // Export what the cart is actually using — authored entries as-is, generated
   // ones as editable specs — so auto-synth is the first draft of authoring
@@ -694,6 +764,7 @@ async function boot() {
     get cart() { return cart; },
     load: (c) => loadCart(c),
     loadUrl: (u) => openCart(() => cartFromUrl(u)),
+    eject: () => eject(),
     step(n = 1) {
       const s = session;
       if (!s) return null;
@@ -717,7 +788,18 @@ async function boot() {
     requestAnimationFrame(loop);
     window.__ticks = (window.__ticks || 0) + 1;
     const dt = now - last; last = now;
-    if (!session || paused) { acc = 0; return; }
+    if (!session) {
+      // idle scene, throttled: nothing here needs 30 fps and this is a screen
+      // people may leave sitting open
+      acc = 0;
+      if (document.body.classList.contains('no-cart') && now - idleAt >= 100) {
+        idleAt = now;
+        drawIdle(now);
+        renderer.frame(vol);
+      }
+      return;
+    }
+    if (paused) { acc = 0; return; }
     const s = session;
     acc += dt;
     if (acc > s.step * 4) acc = s.step;   // tab was hidden: don't spiral
@@ -751,7 +833,11 @@ async function boot() {
   }
   requestAnimationFrame(loop);
 
-  await openCart(() => cartFromUrl(q.get('cart') || BUILTIN));
+  // A ?cart= URL is explicit intent, so it boots straight into the game;
+  // otherwise start at the launcher rather than assuming the built-in cart.
+  // (?cart=/cart restores the old boot-straight-into-iso-defender behaviour.)
+  if (q.get('cart')) await openCart(() => cartFromUrl(q.get('cart')));
+  else showLauncher();
 }
 
 boot().catch(showError);
