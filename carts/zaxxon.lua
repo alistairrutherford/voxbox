@@ -67,6 +67,43 @@ end
 
 function has_deck() return zone_kind ~= "space" end
 
+-- Ramparts down both flanks, so the deck reads as a fortress you are flying
+-- *into* rather than a bare runway. Deliberately asymmetric: the camera sits
+-- off the +x side, so anything tall on that flank would stand between you and
+-- the play area. The far flank gets the towers; the near one stays low.
+function fortress_walls()
+  local off = flr(scrolled) % 24
+
+  -- far flank (x low): full rampart, crenellations, towers
+  boxfill(0, 0, GROUND - 9, 6, 127, GROUND, 13)
+  boxfill(0, 0, GROUND - 9, 6, 127, GROUND - 8, 7)          -- coping
+  for i = -1, 6 do
+    local y = i * 24 + off
+    if y >= 0 and y <= 116 then
+      boxfill(0, y, GROUND - 14, 6, min(y + 10, 127), GROUND - 10, 13)
+      boxfill(0, y, GROUND - 14, 6, min(y + 10, 127), GROUND - 14, 7)
+    end
+  end
+  for i = -1, 3 do                                          -- towers
+    local y = i * 48 + (flr(scrolled) % 48)
+    if y >= 0 and y <= 112 then
+      boxfill(0, y, GROUND - 24, 8, min(y + 14, 127), GROUND, 12)
+      boxfill(0, y, GROUND - 24, 8, min(y + 14, 127), GROUND - 22, 8)
+      vset(4, min(y + 7, 127), GROUND - 25, (frame % 24 < 12) and 10 or 9)
+    end
+  end
+
+  -- near flank (x high): kept below the flight band so it never masks the deck
+  boxfill(121, 0, GROUND - 5, 127, 127, GROUND, 13)
+  boxfill(121, 0, GROUND - 5, 127, 127, GROUND - 4, 7)
+  for i = -1, 6 do
+    local y = i * 24 + off
+    if y >= 0 and y <= 116 then
+      boxfill(121, y, GROUND - 8, 127, min(y + 10, 127), GROUND - 6, 13)
+    end
+  end
+end
+
 function world_draw()
   if has_deck() then
     boxfill(0, 0, GROUND, 127, 127, 63, C_DECK)
@@ -78,10 +115,8 @@ function world_draw()
         boxfill(0, y, GROUND, 127, y + 1, GROUND, C_PANEL)
       end
     end
-    -- centre lane + edge rails, so x position is readable at a glance
-    boxfill(63, 0, GROUND, 64, 127, GROUND, C_STRIPE)
-    boxfill(0, 0, GROUND - 3, 3, 127, GROUND, C_RAIL)
-    boxfill(124, 0, GROUND - 3, 127, 127, GROUND, C_RAIL)
+    boxfill(63, 0, GROUND, 64, 127, GROUND, C_STRIPE)   -- centre lane
+    fortress_walls()
   end
   -- Stars only in the void. Over the fortress they read as bullets, and the
   -- sliding rungs already carry the sense of speed.
@@ -103,7 +138,7 @@ function player_update()
   if btn(1) then plr.x = plr.x + P_SPD end
   if btn(2) then plr.z = plr.z - P_ASPD end   -- up = smaller z
   if btn(3) then plr.z = plr.z + P_ASPD end
-  plr.x = clamp(plr.x, 8, 119)
+  plr.x = clamp(plr.x, 14, 113)   -- keeps the wingtips clear of the ramparts
   plr.z = clamp(plr.z, ALT_TOP, ALT_BOT)
 
   if plr.cool > 0 then plr.cool = plr.cool - 1 end
@@ -116,6 +151,18 @@ function player_update()
   fuel = fuel - FUEL_BURN
   if fuel <= 25 and frame % 45 == 0 then sfx_safe("warn_fuel") end
   if fuel <= 0 then fuel = 0 player_die("out of fuel") end
+end
+
+-- The engine's own drop shadow is soft and blurred, which is lovely for scenery
+-- but too vague to fly by. This paints a hard silhouette of the ship straight
+-- onto the deck, directly beneath it — a crisp marker of exactly where you are
+-- and, by how far it trails the ship on screen, how high.
+function player_shadow()
+  if not has_deck() then return end
+  local x, y = flr(plr.x), PLR_Y
+  boxfill(x - 7, y - 1, GROUND, x + 7, y + 1, GROUND, 0)   -- wing span
+  boxfill(x - 1, y - 6, GROUND, x + 1, y + 5, GROUND, 0)   -- fuselage
+  boxfill(x - 4, y + 1, GROUND, x + 4, y + 3, GROUND, 0)
 end
 
 function player_draw()
@@ -456,24 +503,26 @@ function hud_draw()
   boxfill(0, 0, HUD_Z, 127, 0, GROUND, 1)
   line(0, HUD_Z, 127, HUD_Z, 12)
 
-  print("score " .. score, 3, HUD_Z + 3, 7)
-  print("hi " .. hiscore, 3, HUD_Z + 10, 10)
+  -- Indented past x=8: the far-flank towers stand in front of the board's left
+  -- edge, and text tucked in the corner gets its first characters eaten.
+  print("score " .. score, 13, HUD_Z + 3, 7)
+  print("hi " .. hiscore, 13, HUD_Z + 10, 10)
   print(zone_name(), 84, HUD_Z + 3, 11)
   for i = 1, min(lives - 1, 6) do pset(86 + i * 4, HUD_Z + 11, 12) end
 
   -- fuel: the clock you are always racing
-  local fw = flr(fuel * 38 / FUEL_MAX)
-  print("fuel", 3, HUD_Z + 17, 6)
-  line(20, HUD_Z + 17, 58, HUD_Z + 17, 5)
+  local fw = flr(fuel * 36 / FUEL_MAX)
+  print("fuel", 13, HUD_Z + 17, 6)
+  line(31, HUD_Z + 17, 67, HUD_Z + 17, 5)
   if fw > 0 then
     local c = (fuel <= 25) and ((frame % 16 < 8) and 8 or 9) or 11
-    line(20, HUD_Z + 17, 20 + fw, HUD_Z + 17, c)
+    line(31, HUD_Z + 17, 31 + fw, HUD_Z + 17, c)
   end
 
   -- Altitude ladder. It seconds the shadow rather than replacing it: the
   -- shadow sliding along the deck is the gauge you actually fly by.
-  print("alt", 66, HUD_Z + 17, 6)
-  local gx0, gx1 = 84, 122
+  print("alt", 73, HUD_Z + 17, 6)
+  local gx0, gx1 = 90, 122
   local gz = HUD_Z + 19
   line(gx0, gz, gx1, gz, 5)
   line(gx0, gz - 3, gx0, gz, 6)    -- deck end
@@ -634,6 +683,8 @@ function _draw()
     return
   end
 
+  -- shadow first: it belongs to the deck, and everything else sits above it
+  if mode ~= "dying" and mode ~= "over" then player_shadow() end
   for o in all(objs) do obj_draw(o) end
   if boss then boss_draw() end
   shots_draw()
