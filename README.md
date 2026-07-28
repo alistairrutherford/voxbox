@@ -1,7 +1,8 @@
 # voxbox
 
-Browser Voxatron-style engine for `iso-defender` (see
-[../VOXBOX_ENGINE_PLAN.md](../VOXBOX_ENGINE_PLAN.md)).
+A browser runtime for pure-Lua Voxatron cartridges. Hand it a `.lua` cart and
+it loads, runs and makes noise. Self-contained: everything it needs is in this
+repository.
 
 ## Status
 
@@ -38,7 +39,7 @@ Browser Voxatron-style engine for `iso-defender` (see
   Skipped as unnecessary: Canvas2D fallback (per plan §8), dirty-region
   texture uploads (whole pipeline is ~0.1 ms/frame), GIF capture.
 
-### Generic-cart work (see [../VOXBOX_GENERIC_PLAN.md](../VOXBOX_GENERIC_PLAN.md))
+### Generic-cart work (see [docs/VOXBOX_GENERIC_PLAN.md](docs/VOXBOX_GENERIC_PLAN.md))
 
 - **Phase 1 — done.** The cart now runs in a sandboxed `_ENV` built from an API
   manifest (`shim/api.lua`), not the raw Lua globals: no `io`/`os`/`require`/
@@ -76,7 +77,7 @@ Browser Voxatron-style engine for `iso-defender` (see
   from engine code; a `<cart>.voxbox.json` sidecar now declares `name`,
   `camera`, `sfx` and `persistGlobals` (`["score"]` restores as saved,
   `{"hiscore":"max"}` never restores downward), and
-  [builtin.voxbox.json](builtin.voxbox.json) is what keeps the reference cart's
+  [carts/voxel_defender.voxbox.json](carts/voxel_defender.voxbox.json) is what keeps the reference cart's
   behaviour without any iso-defender specifics in the host. Saves also flush on
   cart swap and on `pagehide`/`visibilitychange`, since browsers throttle
   timers to roughly once a minute in a backgrounded tab.
@@ -125,11 +126,31 @@ is chosen. From there:
 
 - **load .lua file(s)…** — one file or several (loaded in filename order)
 - **load folder…** — a whole directory, sidecars included
-- **play iso-defender (built-in)** — the reference cart
+- **play iso-defender** — the reference cart
+- **play galaxian** — a bundled Galaxian clone ([carts/galaxian.lua](carts/galaxian.lua)),
+  written in pure Voxatron Lua as a worked example of a cart the engine did not
+  grow up around: swaying formation, diving attackers, waves, and a hiscore
+  stored through `cartdata`/`dget`/`dset`. All of its audio is auto-synthesised
+  from the sound names.
 - or drop a file, several, or a folder anywhere on the page
 
-The same three buttons live in the **cart** panel while a cart is running, with
-**eject** to return to the launcher. `?cart=<url>` skips the launcher and boots
+The same buttons live in the **cart** panel while a cart is running, with
+**eject** to return to the launcher. <kbd>esc</kbd> opens a pause menu —
+resume or quit to the launcher — and suspends the audio context so music
+freezes mid-bar and resumes there. (<kbd>p</kbd> remains the quiet pause used
+with <kbd>n</kbd> for single-frame stepping; it deliberately shows no menu.)
+
+The **controls** panel is filled from the cart's manifest, so it describes
+whatever is loaded rather than the reference cart:
+
+```json
+"controls": [["arrows / wasd", "fly"], ["x", "fire"], "hold z to charge"]
+```
+
+A `[keys, action]` pair renders the keys as a `<kbd>`; a bare string renders as
+a plain line. Cart-supplied text is HTML-escaped. The host's own bindings
+(<kbd>esc</kbd>/<kbd>p</kbd>/<kbd>n</kbd>/<kbd>m</kbd>, gamepad) are listed
+separately, since they are not a cart's concern. `?cart=<url>` skips the launcher and boots
 straight in — `?cart=/cart` restores the old behaviour of going directly into
 `iso-defender`. Unknown sound names auto-synthesise (`?autosfx=0` to silence
 them); unknown music stays silent unless `?automusic=1`.
@@ -151,8 +172,11 @@ shim/driver.lua       deterministic scripted input session
 runtime/js/sfxgen.js  sound name -> sfx.json spec (keyword archetypes + name hash)
 tools/trace_run.py    Python oracle: lupa + shim + cart -> trace_py.txt
 tools/conform.py      trace differ (first divergence + op-count drift)
+tools/import_cart.py  pull a cart in from an external source tree
+docs/                 design plans: VOXBOX_ENGINE_PLAN, VOXBOX_GENERIC_PLAN
 app.py                flask dev server (localhost:8080)
-builtin.voxbox.json   per-cart manifest for the built-in cart (/cart.voxbox.json)
+carts/                bundled carts, each with a .voxbox.json sidecar:
+                        voxel_defender.lua (the reference cart), galaxian.lua
 runtime/conform.html  browser conformance runner (streams trace to flask)
 runtime/vendor/wasmoon/   vendored wasmoon 1.16.0 (index.js + glue.wasm)
 ```
@@ -166,9 +190,19 @@ open "http://localhost:8080/?frames=4000"     # runner -> trace_js.txt (streamed
 python3 tools/conform.py trace_py.txt trace_js.txt
 ```
 
-`GET /cart` rebuilds `iso-defender/build/voxel_defender.lua` automatically
-when `src/` is newer, so editing the game and re-running conformance needs no
-manual build step.
+Both hosts read the same bytes: `tools/trace_run.py` loads
+`carts/voxel_defender.lua` from disk and the browser runner is served the same
+file, so they cannot diverge on cart content.
+
+Carts developed in another source tree are pulled in explicitly rather than
+rebuilt behind your back:
+
+```sh
+python3 tools/import_cart.py ../some-game/src --name some-game
+```
+
+A directory is concatenated in filename order (the `01_`…`09_` load-order
+convention); a single `.lua` file is copied as-is.
 
 ## Determinism rules (why traces can be identical)
 

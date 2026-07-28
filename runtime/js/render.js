@@ -1,6 +1,6 @@
 // render.js : WebGL2 perspective raymarcher over the 128x128x64 volume.
 //
-// Matches the original Voxatron look (iso-defender/game.jpg): perspective
+// Matches the original Voxatron look: perspective
 // camera from above-front, per-face flat shading (tops brightest), soft
 // straight-down drop shadows on the ground, volume floating in black.
 // The volume uploads as an R8UI 3D texture (value = paletteIndex+1, 0=empty)

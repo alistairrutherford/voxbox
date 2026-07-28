@@ -10,27 +10,31 @@
  #stage{position:relative;width:100%;max-width:960px}
  #screen{background:#000;image-rendering:pixelated;outline:1px solid #222;
          display:block;width:100%;height:auto;aspect-ratio:4/3}
- /* Launcher sits over the idle iso view rather than replacing it, so the
-    renderer is visibly alive before any cart is loaded. Only the card is
-    darkened — a full-canvas scrim would hide the very thing it sits on. */
- /* Top-aligned: the camera leaves the upper part of the frame empty, so the
-    card lives there and the whole slab stays visible underneath it. */
- #launcher{display:none;position:absolute;inset:0;z-index:4;
-           flex-direction:column;align-items:center;justify-content:flex-start;
-           padding:3% 16px;box-sizing:border-box}
+ /* Overlays sit over the live view rather than replacing it, so the renderer
+    stays visible behind them. Only the card is darkened — a full-canvas scrim
+    would hide the very thing it sits on. */
+ .overlay{display:none;position:absolute;inset:0;z-index:4;
+          flex-direction:column;align-items:center;
+          padding:3% 16px;box-sizing:border-box}
+ /* the launcher is top-aligned: the camera leaves the upper part of the frame
+    empty, so the card lives there and the whole slab stays visible below it */
+ #launcher{justify-content:flex-start}
+ #pausemenu{justify-content:center;background:#0007}
  body.no-cart #launcher{display:flex}
- #launcher .card{display:flex;flex-direction:column;align-items:center;gap:9px;
-                 text-align:center;padding:18px 26px;border:1px solid #2c3a2c;
-                 border-radius:4px;background:#080c08ee;max-width:30em}
- #launcher h1{color:#9c9;font-size:28px;letter-spacing:3px;margin:0}
- #launcher p{color:#7a7a7a;margin:0}
- #launcher .hint{color:#606060;font-size:11px;margin-top:2px}
- #launcher code{color:#7a8a7a}
- #launcher .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
- #launcher button{font-size:13px;padding:8px 16px;background:#141814;
-                  border-color:#3a4a3a;color:#adb}
- #launcher button:hover{border-color:#6a6;background:#1b241b}
- #launcher button.alt{color:#899;border-color:#333}
+ body.paused-menu #pausemenu{display:flex}
+ .card{display:flex;flex-direction:column;align-items:center;gap:9px;
+       text-align:center;padding:18px 26px;border:1px solid #2c3a2c;
+       border-radius:4px;background:#080c08ee;max-width:30em}
+ .overlay h1{color:#9c9;font-size:28px;letter-spacing:3px;margin:0}
+ .overlay h2{color:#9c9;font-size:17px;letter-spacing:2px;margin:0}
+ .overlay p{color:#7a7a7a;margin:0}
+ .overlay .hint{color:#606060;font-size:11px;margin-top:2px}
+ .overlay code{color:#7a8a7a}
+ .overlay .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+ .overlay button{font-size:13px;padding:8px 16px;background:#141814;
+                 border-color:#3a4a3a;color:#adb}
+ .overlay button:hover{border-color:#6a6;background:#1b241b}
+ .overlay button.alt{color:#899;border-color:#333}
  #panel{display:flex;flex-wrap:wrap;gap:12px 24px;color:#777;max-width:960px;width:100%}
  #panel section{min-width:150px}
  #panel h3{color:#bbb;margin:0 0 4px;font-size:12px}
@@ -61,6 +65,8 @@
        align-items:center;justify-content:center;color:#9d9;font-size:16px}
  body.dragging #drop{display:flex}
  kbd{color:#aaa}
+ #host-controls{color:#666;margin-top:4px;border-top:1px solid #222;padding-top:4px}
+ #host-controls kbd{color:#888}
  button{background:#1a1a1a;color:#9a9;border:1px solid #333;
         font:12px monospace;padding:3px 10px;cursor:pointer;margin:2px 4px 2px 0}
  button:hover{border-color:#575}
@@ -84,7 +90,18 @@
 <body>
 <div id="stage">
  <canvas id="screen" width="960" height="720"></canvas>
- <div id="launcher">
+ <div id="pausemenu" class="overlay">
+  <div class="card">
+   <h2>paused</h2>
+   <p id="pause-cart">—</p>
+   <div class="row">
+    <button id="pause-resume">resume</button>
+    <button id="pause-quit" class="alt">quit to menu</button>
+   </div>
+   <p class="hint"><code>esc</code> resumes · quitting discards this run</p>
+  </div>
+ </div>
+ <div id="launcher" class="overlay">
   <div class="card">
    <h1>voxbox</h1>
    <p>a browser runtime for pure-Lua Voxatron cartridges</p>
@@ -92,7 +109,10 @@
     <button id="pick-files">load .lua file(s)…</button>
     <button id="pick-folder">load folder…</button>
    </div>
-   <button id="pick-builtin" class="alt">play iso-defender (built-in)</button>
+   <div class="row">
+    <button id="pick-builtin" class="alt">play iso-defender</button>
+    <button id="pick-galaxian" class="alt">play galaxian</button>
+   </div>
    <p class="hint">or drop a .lua file, several, or a whole folder anywhere on
     this page. A folder may also carry <code>sfx.json</code> and
     <code>&lt;cart&gt;.voxbox.json</code> alongside the Lua.</p>
@@ -115,10 +135,12 @@
   <div style="color:#666">or drop a file or folder</div>
  </section>
  <section><h3>controls</h3>
-  <div><kbd>arrows/wasd</kbd> fly · <kbd>x</kbd> fire</div>
-  <div><kbd>z</kbd>/<kbd>c</kbd> bomb · <kbd>down+z</kbd> warp</div>
-  <div><kbd>p</kbd> pause · <kbd>n</kbd> step · <kbd>m</kbd> mute</div>
-  <div style="color:#666">gamepad: stick/dpad + A/B</div>
+  <!-- filled from the cart's manifest; the host bindings below never change -->
+  <div id="cart-controls"></div>
+  <div id="host-controls">
+   <div><kbd>esc</kbd> pause menu · <kbd>p</kbd> pause · <kbd>n</kbd> step</div>
+   <div><kbd>m</kbd> mute · gamepad: stick/dpad + A/B</div>
+  </div>
  </section>
  <section><h3>audio</h3>
   <div style="color:#666">press any key to enable</div>

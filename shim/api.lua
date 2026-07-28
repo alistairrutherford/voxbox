@@ -19,11 +19,11 @@
 -- Entries are {policy, default}; `default` is what a "value" stub returns.
 --
 -- Provenance, stated plainly: the PICO-8 stdlib names below are certain.  The
--- Voxatron-specific names beyond those the reference cart uses (see
--- iso-defender/ASSEMBLY.md) are best-effort and should be corrected against the
--- real 0.3.5b API notes.  The manifest is expected to start incomplete — the
--- host's undeclared-global reporting exists to close the gap from observed
--- behaviour rather than from guesswork.
+-- Voxatron-specific names beyond those the reference cart (carts/
+-- voxel_defender.lua) actually calls are best-effort and should be corrected
+-- against the real 0.3.5b API notes.  The manifest is expected to start
+-- incomplete — the host's undeclared-global reporting exists to close the gap
+-- from observed behaviour rather than from guesswork.
 
 -- Lua globals the cart may see.  Everything else is withheld: io, os, require,
 -- package, load/loadstring, dofile/loadfile, debug, collectgarbage.  `math` is

@@ -169,6 +169,13 @@ export class AudioBank {
     if (this.ctx.state === 'suspended') this.ctx.resume();
   }
 
+  // Pausing the whole context freezes music mid-bar and resumes it there,
+  // which is what a pause menu should do. Never creates a context: if audio
+  // was never unlocked there is nothing to suspend.
+  suspend() {
+    if (this.ctx && this.ctx.state === 'running') this.ctx.suspend();
+  }
+
   // first user gesture: start the context and any music that was requested
   // while it was still locked
   unlock() {

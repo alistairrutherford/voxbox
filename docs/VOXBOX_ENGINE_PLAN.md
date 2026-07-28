@@ -254,19 +254,19 @@ renderer.
 ## 6. Phases
 
 **Phase 0 — spec extraction (Python). ✅ DONE 2026-07-18.** Canonical shim is
-`voxbox/shim/picovox.lua` (deterministic trig/PRNG/`pairs` + trace recorder) —
+`shim/picovox.lua` (deterministic trig/PRNG/`pairs` + trace recorder) —
 one Lua file executed by every host is a stronger contract than a manifest.
-Oracle: `voxbox/tools/trace_run.py` (lupa, Lua 5.5); differ:
-`voxbox/tools/conform.py`.
+Oracle: `tools/trace_run.py` (lupa, Lua 5.5); differ:
+`tools/conform.py`.
 
 **Phase 1 — headless JS runtime. ✅ DONE 2026-07-18.** Vendored wasmoon 1.16.0
-(Lua 5.4/WASM) runs the cart in the browser via `voxbox/app.py` (Flask) +
-`voxbox/runtime/conform.html`, streaming its trace back. Node never needed.
+(Lua 5.4/WASM) runs the cart in the browser via `app.py` (Flask) +
+`runtime/conform.html`, streaming its trace back. Node never needed.
 Result: 4000-frame traces **bit-identical** to the oracle (631,810 lines,
 including a level-1 clear); game logic ~0.6 ms/frame in-browser.
 
 **Phase 2 — renderer. ✅ DONE 2026-07-18.** WebGL2 perspective raymarcher
-(`voxbox/runtime/js/render.js`) with per-face shading + blurred drop shadows;
+(`runtime/js/render.js`) with per-face shading + blurred drop shadows;
 volume + primitives in JS (`volume.js`, `box()` = 12-edge wireframe per the
 landing pad); 3×5 font; keyboard input; 30 Hz loop. Title and level 1 verified
 in-browser against `game.jpg` — HUD/radar/pad/colonists/shadows all match.
@@ -278,7 +278,7 @@ CPU cost ~0.1 ms/frame. Note: rAF starves in occluded tabs (automation);
 frame, touch overlay (auto-shown on touch devices, `?touch=1` to force),
 error overlay, sound-name monitor with missing-name flagging.
 
-**Phase 4 — audio. ✅ DONE 2026-07-18.** `voxbox/audio/sfx.json` (15 SFX +
+**Phase 4 — audio. ✅ DONE 2026-07-18.** `audio/sfx.json` (15 SFX +
 7 music tracks), rendered by both `tools/sfxgen.py` (numpy reference) and
 `runtime/js/synth.js` (browser) — parity verified (exact durations, RMS to
 4 decimals on tonal sounds). Music loops pre-render to AudioBuffers instead

@@ -81,23 +81,26 @@ const LUA = /\.lua$/i;
 const JSON_RE = /\.json$/i;
 const MANIFEST_RE = /\.voxbox\.json$/i;
 
-const BUILTIN = '/cart';
+const BUILTIN = '/carts/voxel_defender.lua';
+// /cart is the older alias for the same bytes; the conformance runner and any
+// existing ?cart=/cart bookmark still use it.
+const BUILTIN_ALIAS = '/cart';
 
-// Built-in-ness is a property of the URL, not of how we got here — otherwise
-// reloading /cart by hand silently loses its authored sound pack.
+// The reference cart is just a bundled cart: it gets its name, camera and
+// sound pack from its sidecar like any other, and needs no special case here.
+// `builtin` survives only to authorise the one-time legacy save migration.
 async function cartFromUrl(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
   const src = await r.text();
-  const builtin = url === BUILTIN;
   const stem = url.replace(LUA, '');
   return {
-    name: builtin ? 'built-in cart' : (url.split('/').pop() || url),
+    name: url.split('/').pop() || url,
     chunks: [{ name: 'cart', src }],
-    builtin,
+    builtin: url === BUILTIN || url === BUILTIN_ALIAS,
     // the documented sidecar convention: cart.lua -> cart.sfx.json / cart.voxbox.json
-    sfxUrl: builtin ? '/sfx.json' : `${stem}.sfx.json`,
-    manifestUrl: builtin ? '/cart.voxbox.json' : `${stem}.voxbox.json`,
+    sfxUrl: `${stem}.sfx.json`,
+    manifestUrl: `${stem}.voxbox.json`,
   };
 }
 
@@ -229,6 +232,11 @@ function apiMonitor(getSession) {
     },
   };
 }
+
+// Manifest text is cart-supplied, so it is escaped before it ever reaches
+// innerHTML — a dropped cart must not be able to inject markup into the page.
+const esc = (s) => String(s).replace(/[&<>"]/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function showError(e, hint) {
   const el = $('#error');
@@ -389,6 +397,7 @@ async function boot() {
       } catch { /* not there: no overrides */ }
     }
     if (man?.name) { cart = { ...cart, name: man.name }; showCart(); }
+    showControls(man);
 
     // camera: URL params stay authoritative, being explicit user intent
     if (man?.camera) {
@@ -532,6 +541,26 @@ async function boot() {
   });
 
   // ---- cart panel ------------------------------------------------------
+  // A cart's controls are its own business, so they come from its manifest:
+  //   "controls": [["arrows", "move"], ["x", "fire"], "hold z to charge"]
+  // A two-element pair renders as <kbd>keys</kbd> action; a bare string renders
+  // as a plain line. The host's own bindings live in #host-controls and never
+  // change, which is why they are kept separate.
+  function showControls(man) {
+    const list = Array.isArray(man?.controls) ? man.controls : null;
+    const el = $('#cart-controls');
+    if (!list) {
+      el.innerHTML = cart
+        ? '<div style="color:#666">cart controls unlisted — try '
+          + '<kbd>arrows</kbd> and <kbd>x</kbd></div>'
+        : '';
+      return;
+    }
+    el.innerHTML = list.map((item) => (Array.isArray(item)
+      ? `<div><kbd>${esc(item[0])}</kbd> ${esc(item[1] ?? '')}</div>`
+      : `<div>${esc(item)}</div>`)).join('');
+  }
+
   function showCart() {
     $('#cartname').textContent = cart ? cart.name : '—';
     const many = cart && cart.chunks.length > 1;
@@ -606,9 +635,33 @@ async function boot() {
     bank.stopMusic();
     mon.reset();
     clearError();
+    closePauseMenu(false);
     setPaused(false);
     showCart();
+    showControls(null);
     showLauncher();
+  }
+
+  // ---- pause menu -------------------------------------------------------
+  // Distinct from the `p` key, which is a quiet pause for single-frame
+  // stepping: esc is the player-facing one, so it stops the audio and puts a
+  // prompt on screen.
+  let menuOpen = false;
+  function openPauseMenu() {
+    if (!session || menuOpen) return;
+    menuOpen = true;
+    kb.fill(0);                  // don't resume into a held direction
+    setPaused(true);
+    bank.suspend();
+    $('#pause-cart').textContent = cart ? cart.name : '';
+    document.body.classList.add('paused-menu');
+    status('paused');
+  }
+  function closePauseMenu(resume = true) {
+    if (!menuOpen) return;
+    menuOpen = false;
+    document.body.classList.remove('paused-menu');
+    if (resume) { setPaused(false); bank.resume(); }
   }
 
   // one handler for both inputs: the folder one just arrives with
@@ -628,9 +681,14 @@ async function boot() {
   $('#load').addEventListener('click', pickFiles);
   $('#loadfolder').addEventListener('click', pickFolder);
   $('#eject').addEventListener('click', eject);
+  $('#pause-resume').addEventListener('click', () => closePauseMenu());
+  $('#pause-quit').addEventListener('click', eject);
   $('#pick-files').addEventListener('click', pickFiles);
   $('#pick-folder').addEventListener('click', pickFolder);
   $('#pick-builtin').addEventListener('click', playBuiltin);
+  // bundled example carts load by URL, so they pick up their sidecars for free
+  $('#pick-galaxian').addEventListener('click',
+    () => openCart(() => cartFromUrl('/carts/galaxian.lua')));
 
   addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -685,6 +743,14 @@ async function boot() {
   showMute();
 
   addEventListener('keydown', (e) => {
+    if (e.code === 'Escape') {
+      if (menuOpen) closePauseMenu(); else openPauseMenu();
+      e.preventDefault();
+      return;
+    }
+    // the pause menu swallows game input, and must not let a stray keypress
+    // restart the audio context it just suspended
+    if (menuOpen) return;
     bank.unlock();   // audio can only start after a user gesture
     if (e.code in KEYMAP) { kb[KEYMAP[e.code]] = 1; e.preventDefault(); }
     else if (e.code === 'KeyM') toggleMute();

@@ -1,0 +1,22 @@
+{
+  "_comment": "Per-cart manifest for the bundled Galaxian clone, picked up automatically from the <cart>.voxbox.json sidecar convention.",
+
+  "name": "galaxian (bundled)",
+
+  "controls": [
+    ["left / right", "move"],
+    ["x", "fire"],
+    "two shots on screen at a time"
+  ],
+
+  "_camera": "Slightly lower and tighter than the engine default: the action fills the whole deck, and a shallower angle makes the formation read as hanging above it.",
+  "camera": {
+    "pos": [64, 252, -98],
+    "target": [64, 66, 40],
+    "fov": 42
+  },
+
+  "_groundZ": "Left to auto-derivation, which lands on the deck at z=50.",
+
+  "_persistGlobals": "None needed: the cart stores its hiscore through cartdata/dget/dset like a real Voxatron cart would."
+}

@@ -15,8 +15,9 @@ import sys
 from lupa import LuaRuntime
 
 VOXBOX = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ROOT = os.path.dirname(VOXBOX)
-DEFAULT_CART = os.path.join(ROOT, "iso-defender", "build", "voxel_defender.lua")
+# the bundled cart, which is also exactly what the browser runner is served, so
+# the two hosts cannot diverge on cart bytes
+DEFAULT_CART = os.path.join(VOXBOX, "carts", "voxel_defender.lua")
 FLUSH_EVERY = 100  # frames per trace_flush, bounds Lua-side memory
 
 

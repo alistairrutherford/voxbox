@@ -1,0 +1,27 @@
+# Conformance traces — ~31 MB of regenerable text, not source.
+#   python3 tools/trace_run.py --frames 4000        # -> trace_py.txt
+#   open http://localhost:8080/conform?frames=4000  # -> trace_js.txt
+# The oracle is derived from the cart and the shim, both of which are
+# committed, so there is nothing here a checkout cannot rebuild.
+trace_py.txt
+trace_py2.txt
+trace_js.txt
+trace_js.status
+
+# Rendered audio previews — python3 tools/sfxgen.py --wavs build/wavs
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Claude Code: launch.json is shared project config and is committed;
+# settings.local.json holds per-machine permissions and is not.
+.claude/settings.local.json

@@ -9,13 +9,12 @@ tools/conform.py can diff them against the Python oracle.
 Run:  python3 app.py     (localhost:8080)
 """
 import os
-import subprocess
 
 from flask import Flask, Response, request, send_from_directory
 
 VOXBOX = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(VOXBOX)
-ISO = os.path.join(ROOT, "iso-defender")
+CARTS = os.path.join(VOXBOX, "carts")
+DEFENDER = "voxel_defender.lua"
 TRACE_JS = os.path.join(VOXBOX, "trace_js.txt")
 
 app = Flask(__name__)
@@ -47,23 +46,31 @@ def shim(p):
                                mimetype="text/plain")
 
 
-@app.get("/cart.voxbox.json")
-def cart_manifest():
-    """Per-cart manifest for the built-in cart (camera, persisted globals)."""
-    return send_from_directory(VOXBOX, "builtin.voxbox.json")
+@app.get("/carts/<path:p>")
+def carts(p):
+    """Bundled carts, plus their .voxbox.json / .sfx.json sidecars.
 
+    Served straight off disk: the server has no knowledge of where any cart
+    came from. To refresh one from an external source tree, run
+    tools/import_cart.py — an explicit step, not a hidden rebuild.
+    """
+    mime = "text/plain" if p.endswith(".lua") else None
+    return send_from_directory(CARTS, p, mimetype=mime)
+
+
+# ---- /cart aliases ---------------------------------------------------------
+# The reference cart is just a bundled cart now, but the conformance runner and
+# any ?cart=/cart bookmark still address it here, so both paths serve the same
+# bytes rather than drifting apart.
 
 @app.get("/cart")
 def cart():
-    """Serve the combined cart, re-running build.sh if any src/ file is newer."""
-    build = os.path.join(ISO, "build", "voxel_defender.lua")
-    src_dir = os.path.join(ISO, "src")
-    src_mtime = max(os.path.getmtime(os.path.join(src_dir, f))
-                    for f in os.listdir(src_dir) if f.endswith(".lua"))
-    if not os.path.exists(build) or os.path.getmtime(build) < src_mtime:
-        subprocess.run(["sh", "build.sh"], cwd=ISO, check=True)
-    return send_from_directory(os.path.join(ISO, "build"),
-                               "voxel_defender.lua", mimetype="text/plain")
+    return send_from_directory(CARTS, DEFENDER, mimetype="text/plain")
+
+
+@app.get("/cart.voxbox.json")
+def cart_manifest():
+    return send_from_directory(CARTS, "voxel_defender.voxbox.json")
 
 
 # ---- audio -----------------------------------------------------------------
