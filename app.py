@@ -14,7 +14,6 @@ from flask import Flask, Response, request, send_from_directory
 
 VOXBOX = os.path.dirname(os.path.abspath(__file__))
 CARTS = os.path.join(VOXBOX, "carts")
-DEFENDER = "voxel_defender.lua"
 TRACE_JS = os.path.join(VOXBOX, "trace_js.txt")
 
 app = Flask(__name__)
@@ -56,21 +55,6 @@ def carts(p):
     """
     mime = "text/plain" if p.endswith(".lua") else None
     return send_from_directory(CARTS, p, mimetype=mime)
-
-
-# ---- /cart aliases ---------------------------------------------------------
-# The reference cart is just a bundled cart now, but the conformance runner and
-# any ?cart=/cart bookmark still address it here, so both paths serve the same
-# bytes rather than drifting apart.
-
-@app.get("/cart")
-def cart():
-    return send_from_directory(CARTS, DEFENDER, mimetype="text/plain")
-
-
-@app.get("/cart.voxbox.json")
-def cart_manifest():
-    return send_from_directory(CARTS, "voxel_defender.voxbox.json")
 
 
 # ---- audio -----------------------------------------------------------------

@@ -60,7 +60,7 @@ repository.
   so loading a cart disposes the old state outright rather than unwinding
   globals. Sources: drag/drop a `.lua` file **or a folder** (walked
   recursively, sorted by filename per the `01_`…`09_` convention, with ▲▼
-  overrides), the `load .lua…` picker, `?cart=<url>`, or the built-in `/cart`.
+  overrides), the `load .lua…` picker, or `?cart=<url>`.
   Entrypoints are probed, not assumed — `_update60` switches the loop to 60 Hz
   and a missing `_draw` is tolerated. A cart error halts the loop and shows the
   traceback; an undeclared global is queued and **stub & restart** reloads the
@@ -151,8 +151,8 @@ A `[keys, action]` pair renders the keys as a `<kbd>`; a bare string renders as
 a plain line. Cart-supplied text is HTML-escaped. The host's own bindings
 (<kbd>esc</kbd>/<kbd>p</kbd>/<kbd>n</kbd>/<kbd>m</kbd>, gamepad) are listed
 separately, since they are not a cart's concern. `?cart=<url>` skips the launcher and boots
-straight in — `?cart=/cart` restores the old behaviour of going directly into
-`iso-defender`. Unknown sound names auto-synthesise (`?autosfx=0` to silence
+straight in — e.g. `?cart=/carts/voxel_defender.lua` boots directly into the
+reference cart. Unknown sound names auto-synthesise (`?autosfx=0` to silence
 them); unknown music stays silent unless `?automusic=1`.
 
 Arrows/WASD fly, X fires, Z/C smart bomb, hold Down+Z warp.

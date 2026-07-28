@@ -53,15 +53,14 @@ const stubKey = (id) => `voxbox_extra_stubs:${id}`;
 const dataKey = (id) => `voxbox_cartdata:${id}`;
 const MUTE_KEY = 'voxbox_mute';   // a shell preference, not a per-cart one
 
-// Saved state has outlived two key schemes. Walk the chain oldest-last so an
-// existing hiscore survives the upgrade instead of being silently orphaned.
-function migrateSave(id, chunks, builtin) {
+// Storage keys were FNV-1a before SHA-256; carry a save across so it is not
+// silently orphaned. Cart-agnostic: the old key is derived from cart content,
+// exactly like the new one.
+function migrateSave(id, chunks) {
   if (localStorage.getItem(saveKey(id))) return;
-  const older = [saveKey(fnvId(chunks)), ...(builtin ? ['voxbox_save'] : [])];
-  for (const k of older) {
-    const v = localStorage.getItem(k);
-    if (v) { localStorage.setItem(saveKey(id), v); localStorage.removeItem(k); return; }
-  }
+  const old = saveKey(fnvId(chunks));
+  const v = localStorage.getItem(old);
+  if (v) { localStorage.setItem(saveKey(id), v); localStorage.removeItem(old); }
 }
 
 // Names the manifest never listed, discovered by catching the Lua error and
@@ -81,14 +80,8 @@ const LUA = /\.lua$/i;
 const JSON_RE = /\.json$/i;
 const MANIFEST_RE = /\.voxbox\.json$/i;
 
-const BUILTIN = '/carts/voxel_defender.lua';
-// /cart is the older alias for the same bytes; the conformance runner and any
-// existing ?cart=/cart bookmark still use it.
-const BUILTIN_ALIAS = '/cart';
-
-// The reference cart is just a bundled cart: it gets its name, camera and
-// sound pack from its sidecar like any other, and needs no special case here.
-// `builtin` survives only to authorise the one-time legacy save migration.
+// Every cart loads the same way, bundled or not: fetch the .lua, then look
+// beside it for the sidecars. There is no privileged cart and no special route.
 async function cartFromUrl(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
@@ -97,7 +90,6 @@ async function cartFromUrl(url) {
   return {
     name: url.split('/').pop() || url,
     chunks: [{ name: 'cart', src }],
-    builtin: url === BUILTIN || url === BUILTIN_ALIAS,
     // the documented sidecar convention: cart.lua -> cart.sfx.json / cart.voxbox.json
     sfxUrl: `${stem}.sfx.json`,
     manifestUrl: `${stem}.voxbox.json`,
@@ -502,7 +494,7 @@ async function boot() {
       lua.doStringSync(`local v = vb_get("${n}") return type(v)=="number" and v or nil`);
     s.saves = Object.keys(merge).filter((n) => num(n) != null);
     s.num = num;
-    migrateSave(id, cart.chunks, cart.builtin);
+    migrateSave(id, cart.chunks);
     try {
       const saved = JSON.parse(localStorage.getItem(saveKey(id)) || '{}');
       for (const n of s.saves) {
@@ -677,7 +669,7 @@ async function boot() {
   }
   const pickFiles = () => $('#file').click();
   const pickFolder = () => $('#folder').click();
-  const playBuiltin = () => openCart(() => cartFromUrl(BUILTIN));
+  const playCart = (url) => openCart(() => cartFromUrl(url));
   $('#load').addEventListener('click', pickFiles);
   $('#loadfolder').addEventListener('click', pickFolder);
   $('#eject').addEventListener('click', eject);
@@ -685,10 +677,12 @@ async function boot() {
   $('#pause-quit').addEventListener('click', eject);
   $('#pick-files').addEventListener('click', pickFiles);
   $('#pick-folder').addEventListener('click', pickFolder);
-  $('#pick-builtin').addEventListener('click', playBuiltin);
-  // bundled example carts load by URL, so they pick up their sidecars for free
+  // bundled carts load by URL like any other, so they pick up their sidecars
+  // for free — neither is privileged over the other
+  $('#pick-builtin').addEventListener('click',
+    () => playCart('/carts/voxel_defender.lua'));
   $('#pick-galaxian').addEventListener('click',
-    () => openCart(() => cartFromUrl('/carts/galaxian.lua')));
+    () => playCart('/carts/galaxian.lua'));
 
   addEventListener('dragover', (e) => {
     e.preventDefault();

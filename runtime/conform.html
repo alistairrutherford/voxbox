@@ -36,7 +36,8 @@ async function main() {
 
   const [shim, manifest, sandbox, cart, driver] = await Promise.all(
     ['/shim/picovox.lua', '/shim/api.lua', '/shim/sandbox.lua',
-     '/cart', '/shim/driver.lua'].map(u => fetch(u).then(r => r.text())));
+     '/carts/voxel_defender.lua', '/shim/driver.lua']
+      .map(u => fetch(u).then(r => r.text())));
 
   // no JS host API here: the shim's own trace recorders are the implementation
   await lua.doString(shim);
