@@ -71,12 +71,26 @@ turrets and enemy planes, and blasting fuel drums before the tank runs dry.
 Zones cycle fortress → open space → fortress → a boss robot with a core you
 have to line up on, then repeat, harder.
 
+![zaxxon title screen](zaxxon1.jpg)
+
+The camera is swung round to the genre's three-quarter angle, so the scroll
+axis runs diagonally and you see the deck's flank as well as its face.
+Ramparts, crenellations and beacon towers line both edges — asymmetrically,
+since anything tall on the near flank would stand between you and the play
+area.
+
 It leans on something the engine gives away for free: **your ship's drop shadow
 slides along the deck underneath you, and that shadow is the altitude gauge** —
 the way the genre always intended it to be read. There is a ladder on the back
 wall too, but the shadow is the one you actually fly by. In the space zones
 there is no deck, so the engine finds no ground plane and the shadow correctly
 disappears.
+
+![zaxxon in play](zaxxon2.jpg)
+
+Above: the ship is climbing, and its shadow has fallen well behind it on the
+deck — that gap *is* the altitude reading. The score, fuel and altitude ladder
+are voxels on a board standing at the far end of the run, not an overlay.
 
 ---
 
