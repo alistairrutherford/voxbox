@@ -33,7 +33,7 @@ renderer.
 
 ## The bundled games
 
-Three carts ship with voxbox, all written in pure Voxatron Lua.
+Four carts ship with voxbox, all written in pure Voxatron Lua.
 
 ### Voxel Defender
 
@@ -91,6 +91,31 @@ disappears.
 Above: the ship is climbing, and its shadow has fallen well behind it on the
 deck — that gap *is* the altitude reading. The score, fuel and altitude ladder
 are voxels on a board standing at the far end of the run, not an overlay.
+
+### tempest
+
+A Tempest homage, and the only bundled cart played **down** the depth axis
+rather than across the floor. The web is a tube running from the far wall to
+just in front of the camera; the claw rides the near rim and everything climbs
+toward you. Flippers walk up the lanes and, if they reach the rim, come along it
+after you; tankers split when shot; spikers lay the spikes you have to clear
+before the dive to the next level. Two superzapper charges a level, the first
+clearing the web and the second taking a single enemy, as the cabinet did.
+
+![tempest in play](tempest1.jpg)
+
+The tube is tapered as well as drawn in perspective, so the far mouth ends up
+about a fifth the size of the near rim. That taper matters: the renderer has no
+distance fog, so without it a straight tube reads as a flat ring. The other half
+of the depth cue is in the cart — every radial edge is drawn in five bands that
+brighten toward the player, which is what Tempest's coloured webs were doing
+anyway.
+
+Six web shapes cycle with the level — circle, square, V, star, cross and a flat
+open field — each generated from a corner list rather than drawn by hand. Open
+shapes have walls the claw cannot rotate past; closed ones wrap.
+
+![tempest on the flat open web](tempest2.jpg)
 
 ---
 

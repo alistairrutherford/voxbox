@@ -685,6 +685,8 @@ async function boot() {
     () => playCart('/carts/galaxian.lua'));
   $('#pick-zaxxon').addEventListener('click',
     () => playCart('/carts/zaxxon.lua'));
+  $('#pick-tempest').addEventListener('click',
+    () => playCart('/carts/tempest.lua'));
 
   addEventListener('dragover', (e) => {
     e.preventDefault();

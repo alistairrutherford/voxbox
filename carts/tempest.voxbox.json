@@ -1,0 +1,25 @@
+{
+  "_comment": "Per-cart manifest for the bundled Tempest homage, picked up from the <cart>.voxbox.json sidecar convention.",
+
+  "name": "tempest (bundled)",
+
+  "controls": [
+    ["left / right", "rotate round the rim"],
+    ["x", "fire"],
+    ["z", "superzapper (two charges a level)"],
+    "shoot spikes down before the dive between levels",
+    "flippers that reach the rim will come along it for you"
+  ],
+
+  "_camera": "Straight down the tube's axis, unlike every other bundled cart. The camera sits well outside the volume at y=200 looking at the far wall, which puts the near rim 84 voxels away and the far rim 194 — a 2.3x perspective ratio. The web is tapered to 0.42 on top of that, so the far mouth ends up about a fifth the size of the near rim and the tunnel reads as long. fov 56 is the narrowest that still clears the near rim's corners: at 84 voxels the horizontal half-extent is 59 and the rim needs 48.",
+  "camera": {
+    "pos": [64, 200, 32],
+    "target": [64, 0, 32],
+    "fov": 56
+  },
+
+  "_groundZ": "Off. There is no ground in a tube, and the auto-derivation would otherwise find the mode of the topmost voxels somewhere on the tube's lower wall and hang drop shadows across the web.",
+  "groundZ": false,
+
+  "_persistGlobals": "None needed: the hiscore goes through cartdata/dget/dset."
+}
