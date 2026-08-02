@@ -12,7 +12,7 @@ WebAssembly Lua 5.4 VM, and raymarches the result on the GPU with per-face
 shading and drop shadows. The screen above is live — that idle slab is the real
 renderer, running before any cart is loaded.
 
-It is **self-contained**: clone it, run it, and all three bundled games work.
+It is **self-contained**: clone it, run it, and all five bundled games work.
 
 ---
 
@@ -33,7 +33,7 @@ renderer.
 
 ## The bundled games
 
-Four carts ship with voxbox, all written in pure Voxatron Lua.
+Five carts ship with voxbox, all written in pure Voxatron Lua.
 
 ### Voxel Defender
 
@@ -116,6 +116,57 @@ open field — each generated from a corner list rather than drawn by hand. Open
 shapes have walls the claw cannot rotate past; closed ones wrap.
 
 ![tempest on the flat open web](tempest2.jpg)
+
+### deeper
+
+A turn-based roguelike, drawn isometrically, one dungeon node per volume.
+Randomly generated floors of chambers and corridors, wearable armour you can
+see on the character, joke spells with real mechanics, and a menagerie of
+monsters and ghosts who talk back. Descend far enough and the themes change
+under you: the crypt, the cisterns, the warrens, the ossuary, the red floor.
+
+![deeper: a chamber on the first floor](deeper1.jpg)
+
+**The interesting constraint: the renderer has no lighting.** The fragment
+shader multiplies a palette colour by a constant per face and stops. There are
+no point lights, no falloff, no blending, and voxels are opaque — a torch
+cannot illuminate anything by existing.
+
+So the torchlight lives in the cart. It keeps a **per-voxel** light map — finer
+than the tiles the game is played on, because light wants more resolution than
+the thing it is lighting — and picks each floor and wall voxel's *palette index* from a
+four-step ramp indexed by light level: a warm ramp near torches, a cold one
+away from them, with each torch's radius wobbling every four frames so the
+whole room breathes. Falloff is Euclidean, so the pools are round; Chebyshev
+distance is marginally cheaper and gives square ones, which read as a bug.
+
+Painting every light cell would be sixteen thousand draw calls. Two run-length
+passes — across each row, then merging identical runs down the rows — mean the
+cost tracks the number of light-level *changes* rather than the resolution, so
+a big unlit stretch of floor collapses back to a single box however finely it
+was sampled. The largest node a floor can generate, with eight monsters and a
+full particle burst, costs 5.4 ms of a 33 ms frame.
+
+That makes light a resource rather than decoration. Your torch burns down over
+250 turns and its radius shrinks with it; wall sconces refill it. The Pot Helm
+is +1 armour and −2 vision, which it implements by literally subtracting 2 from
+every light level.
+
+Health comes back the way Rogue's did — slowly, with time — so retreating is a
+real option rather than a stay of execution. Bread and draughts heal properly,
+and reaching a new floor restores health and raises the ceiling, which is what
+makes the stairs worth pushing for.
+
+**Corridors are nodes in their own right** — their own tile grid, torches,
+light map and monsters, drawn by exactly the same code. The only thing that
+makes one a corridor is being three tiles wide.
+
+![deeper: a corridor four floors down](deeper2.jpg)
+
+Ghosts are drawn as horizontal bands with gaps, the phase alternating each few
+frames. Voxels are opaque and there is no alpha, but in a raymarcher that reads
+as translucent and shimmering — and it is five draw calls rather than the two
+hundred `vset`s that per-voxel dithering would have cost.
 
 ---
 

@@ -1,0 +1,28 @@
+{
+  "_comment": "Per-cart manifest for the bundled roguelike. See docs/VOXBOX_ROGUE_PLAN.md.",
+
+  "name": "deeper (bundled)",
+
+  "controls": [
+    ["arrows", "move, or attack by bumping"],
+    ["x", "confirm / start"],
+    ["z", "cast the held scroll"],
+    "your torch burns down: find oil before it does",
+    "health comes back slowly if you break off and walk away",
+    "bread and draughts heal; reaching a new floor heals more",
+    "stairs are the yellow whirlpool",
+    "corridors are places too, and things live in them"
+  ],
+
+  "_camera": "Three-quarter isometric: 22 degrees of azimuth and 38 of elevation, 200 out. The elevation is what shows the floor plan; the azimuth is deliberately modest rather than the textbook 45, because the HUD and all the dialogue are drawn on a y-slice, and a slice seen at 45 degrees skews the 3x5 font past comfortable reading. 22 keeps the isometric read and the text legible. fov 42 frames a node filling the whole 120 x 120 voxel footprint; the target is aimed at the floor rather than mid-air so the room sits centred and the sky band above it stays in shot.",
+  "camera": {
+    "pos": [123, 204, -77],
+    "target": [58, 64, 52],
+    "fov": 42
+  },
+
+  "_groundZ": "Pinned to the floor slab. Auto-derivation would work in a plain room, but a node full of pillars and sill walls shifts the mode of the topmost voxels and the drop shadows jump between rooms. Pinning keeps hero and monster shadows on the floor where they belong.",
+  "groundZ": 58,
+
+  "_persistGlobals": "hiscore and best_depth go through cartdata/dget/dset. A mid-run resume would only need run_seed and depth, since the dungeon regenerates from its seed, but permadeath is the point."
+}
