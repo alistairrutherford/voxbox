@@ -123,6 +123,40 @@ async function cartFromFiles(entries) {
   return { name: manifest?.name || name, chunks, sfxPack, manifest };
 }
 
+// JSON value -> Lua source for the same value, for the manifest's "config"
+// block. Written out rather than parsed in Lua because the sandbox has no JSON
+// decoder and giving it one is a bigger surface than a literal.
+//
+// Strings are escaped a byte at a time into Lua's decimal `\ddd` form rather
+// than passed through JSON.stringify: JSON's `\uXXXX` is not Lua syntax, so a
+// stray non-ASCII character in an authored line would be a load error rather
+// than a wrong glyph. Bytes, not code points, because `\ddd` tops out at 255.
+const UTF8 = new TextEncoder();
+function luaLiteral(v) {
+  if (v === null || v === undefined) return 'nil';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'nil';
+  if (typeof v === 'string') {
+    let out = '"';
+    for (const b of UTF8.encode(v)) {
+      const ch = String.fromCharCode(b);
+      // always three digits: Lua reads up to three after the backslash, so a
+      // short escape followed by a literal digit would swallow it
+      out += (b >= 32 && b < 127 && ch !== '"' && ch !== '\\')
+        ? ch : `\\${String(b).padStart(3, '0')}`;
+    }
+    return `${out}"`;
+  }
+  if (Array.isArray(v)) return `{${v.map(luaLiteral).join(',')}}`;
+  if (typeof v === 'object') {
+    return `{${Object.entries(v)
+      .filter(([, x]) => x !== undefined)
+      .map(([k, x]) => `[${luaLiteral(String(k))}]=${luaLiteral(x)}`)
+      .join(',')}}`;
+  }
+  return 'nil';
+}
+
 // Directory drops arrive as FileSystemEntry trees; plain file drops don't.
 async function entriesFromDrop(dt) {
   const roots = [...dt.items]
@@ -453,6 +487,19 @@ async function boot() {
     }
     const coverage = lua.doStringSync('local r,s = vb_build() return r.."/"..(r+s)');
     console.log(`api coverage: ${coverage} implemented`);
+
+    // ---- manifest "config" -> the cart's CONFIG global ------------------
+    // persistGlobals carries numbers *out* of a cart and back in; this is the
+    // other direction, and it carries tables and strings: the data a cart
+    // wants authorable without a code edit — a look toggle, a table of
+    // dialogue. Installed before the chunks load, so a cart can read it while
+    // it is still building its own tables at the top level.
+    //
+    // A cart run with no manifest sees CONFIG = nil and must fall back to its
+    // own defaults, so the JSON stays an override rather than a dependency.
+    if (man?.config && typeof man.config === 'object') {
+      lua.doStringSync(`vb_set("CONFIG", ${luaLiteral(man.config)})`);
+    }
 
     for (const chunk of cart.chunks) {
       lua.global.set('__src', chunk.src);

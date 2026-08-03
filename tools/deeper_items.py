@@ -5,10 +5,11 @@ Armour slots and the drain/repair loop, what floor 1 actually offers,
 torch counts, monument placement and effects, and the scroll prompt.
 """
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cartlab import load_cart
+from cartlab import load_cart, read
 
 lua = load_cart(init=True)
 
@@ -179,3 +180,38 @@ a, c, avg, none = lua.globals().vb_call("probe_floor1", 200)
 print(f"floor 1, 200 seeds: {int(a)}/200 offer some armour, {int(c)}/200 offer a "
       f"breastplate, {int(none)}/200 offer none")
 print(f"mean armour available on floor 1 if you collect it all: {avg:.2f} (cap is 7)")
+
+
+# ---- monument text --------------------------------------------------
+# The statue and shrine lists are authored in deeper.voxbox.json, which means
+# they can be edited by someone who never opens the cart. These are the three
+# ways that goes wrong silently: a line too long for the HUD row is truncated
+# mid-word, a character the font has no glyph for still advances the cursor and
+# leaves a hole, and a shrine kind prop_touch does not implement fires and does
+# nothing. The font is read out of runtime/js/font.js rather than restated
+# here, so extending the font relaxes this check by itself.
+GLYPHS = set(re.findall(r"""^  (?:'(.)'|"(.)"):""",
+                        read("runtime", "js", "font.js"), re.M))
+GLYPHS = {a or b for a, b in GLYPHS}      # the apostrophe key is double-quoted
+KINDS = {"heal", "torch", "arm", "gold"}
+g = lua.globals()
+cols = int(g.vb_get("HUD_COLS"))
+bad = []
+for name in ("STATUES", "SHRINES"):
+    t = g.vb_get(name)
+    for i in range(1, len(t) + 1):
+        e = t[i]
+        for field in ("n", "say"):
+            s = e[field]
+            if len(s) > cols:
+                bad.append(f"{name}[{i}].{field}: {len(s)} > {cols} chars: {s!r}")
+            missing = sorted(set(s.upper()) - GLYPHS)
+            if missing:
+                bad.append(f"{name}[{i}].{field}: no glyph for {missing}: {s!r}")
+        if name == "SHRINES" and e["k"] not in KINDS:
+            bad.append(f"SHRINES[{i}].k = {e['k']!r}, not one of {sorted(KINDS)}")
+n = len(g.vb_get("STATUES")) + len(g.vb_get("SHRINES"))
+print(f"monument text: {n} entries, {len(GLYPHS)} glyphs, {cols} columns; "
+      + ("all fit" if not bad else f"{len(bad)} PROBLEMS"))
+for b in bad:
+    print("  " + b)

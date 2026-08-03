@@ -30,6 +30,7 @@ Everything below was read out of `runtime/js/render.js`, `runtime/js/volume.js`,
 | Deterministic `rnd`/`srand` (Park-Miller, float-safe) | `picovox.lua:75` | **seeded dungeons that regenerate identically** |
 | `cartdata` / `dget` / `dset`, 64 numeric slots | `host.js:278` | meta-progression |
 | `persistGlobals` sidecar, numeric globals only | `host.js:490` | run resume |
+| manifest `config` block, arriving as the `CONFIG` global | `host.js` | look flags and dialogue authored as data, not code |
 | Sound synthesised from the sound's *name* | `sfxgen.js` | ~40 sounds with no audio authored |
 
 ### Not given — and what we do instead
@@ -54,11 +55,21 @@ Everything below was read out of `runtime/js/render.js`, `runtime/js/volume.js`,
    by a flash on the near sill; offsetting every drawn voxel would be a true
    shake and is the obvious next step, since the cart draws everything.
 
-3. **Text is 3x5 uppercase, ~31 characters across the whole volume.**
+3. **Text is 3x5 uppercase, ~31 characters across the whole volume.** The
+   font is a fixed bitmap with a 4-voxel advance (`font.js`) and there is no
+   scale: one voxel is the smallest mark the renderer can make, so the font
+   cannot be made smaller, and apparent size is set by how far the slice is
+   from the camera — the HUD is already on the farthest plane there is.
 
-   **What we do:** every line of dialogue is written to fit **26 characters**,
+   **What we do:** every line of dialogue is written to fit **24 characters**,
    two lines maximum. This is a constraint on the comedy, and a good one —
-   it forces one-liners.
+   it forces one-liners. 24 rather than the whole width because the minimap
+   holds the right-hand column (§9).
+
+   If a row ever has to hold more, the lever is the font rather than the
+   layout: a variable advance (`I` and `1` are 2 voxels wide, not 4) would fit
+   roughly a third more characters for four lines of `volume.js`. That is an
+   engine change, so it is not on the critical path.
 
 4. **Only 15 colours** (index 0 is empty space, never a paint colour).
 
@@ -220,6 +231,12 @@ multiply the floor's run count, and every third reads as large slabs anyway.
 Flagstones are mottled by nudging the **light level** per tile by ±1, from an
 arithmetic hash rather than `rnd()` so the dungeon's PRNG stream is untouched.
 
+**Off by default**, behind `config.textures` in the manifest, while the look is
+undecided. It is not only a look: mottling breaks up runs that would otherwise
+merge, so switching it off took the worst-case frame from 790 draw calls to 676
+and a full node's floor from 388 runs to 340. The table stays allocated and all
+zero when it is off, so the RLE inner loop reads it unconditionally either way.
+
 Perturbing light rather than painting a speckle colour is the whole trick: the
 mottling then reads correctly in every ramp, at every brightness, and in flat
 mode too. A fixed speckle colour would fight the torchlight and look wrong in
@@ -306,6 +323,17 @@ resource, an escape route and a light source at once.
   fire once and are then spent. The shrine that repairs armour deliberately
   mends the *most damaged piece you are wearing*, tying it to the slots in §4.2
   rather than inventing a second currency.
+- **Monument text lives in the manifest, not the cart.** It is the one part of
+  this game that is pure content, so `config.statues` and `config.shrines` in
+  `deeper.voxbox.json` carry it and the cart keeps only a fallback for running
+  with no manifest at all. Statues are text alone and the list costs nothing to
+  extend — 20 of them at the time of writing. A shrine also names a kind, and
+  only the four the cart implements (`heal`, `torch`, `arm`, `gold`) do
+  anything, so shrine *types* are bounded by code while shrine *text* is not:
+  14 shrines across those four effects. An unrecognised kind still speaks and
+  is still spent once, so a typo in the JSON degrades rather than crashes, and
+  `tools/deeper_items.py` checks every line against the shipped font and the
+  row width.
 - Stairs down in the room furthest from the entrance by graph distance.
 
 ### 3.2 Depth
@@ -476,43 +504,89 @@ is retuned. A fixed banner is honest and always readable.
 
 The HUD slice was planned for y = 118, in front of the room, on the argument
 that **a voxel at y = 118 cannot be occluded by anything at y < 118**, since a
-camera ray reaching it decreases monotonically in y. That argument is correct
-and the placement was still wrong: a near slice is also far closer to the
-camera than the room, so the 3×5 font renders magnified and sprawls across the
-frame. **Built at y = 2 instead** — painted on the back wall, at the room's own
-distance, the way Voxel Defender does it.
+camera ray reaching it decreases monotonically in y. That argument is correct,
+and the *text* still belongs at y = 2 — a near slice is far closer to the
+camera, so the 3×5 font renders magnified and a line of dialogue sprawls across
+the frame. **Text is built at y = 2**, painted on the back wall at the room's
+own distance, the way Voxel Defender does it. The near slice comes back below,
+for the things that are not text.
 
-That trades the occlusion guarantee for a measured one. The usable band on the
-back plane is not obvious and not worth deriving: it was found by drawing a
-grid of labelled test rows and reading them off a screenshot.
+That trades the occlusion guarantee for a measured one, and the measurement was
+first taken off a screenshot of labelled test rows. Reading it off a picture was
+the mistake. **A row of constant z is not a row of constant screen height.** The
+plane is seen at 12 degrees of azimuth, so its right-hand end sits nearer the
+camera and rides *up* the frame: a row at z = 12 on the left is level with
+z = 2.3 by x = 124. Every full-width line is tilted by about ten voxels — two
+glyph heights — and the end that leaves the frame is the left one, where
+health, depth and dialogue live. That was the truncation.
 
-| Band | Result, floor at z = 48 | Result, floor at z = 58 |
-|---|---|---|
-| z < 11 | cropped off the top | clear |
-| z = 11..32 | clear full width | clear |
-| z = 33..38 | room hides the left half | clear |
-| z ≥ 39 | room hides the left half | drifts right, usable for the minimap |
+So the plane is projected rather than photographed: take the manifest camera,
+build its basis the way `render.js:160` does, and solve. The band that is
+actually clear, for a row drawn at one z:
 
-The first column is why the floor was dropped ten voxels (§1.1): four cramped
-rows became a comfortable band from z = 2 down to z = 38. Rows drift right as
-z grows, because the plane is seen at 22 degrees of azimuth — which is why the
-right-hand column sits at x = 60 rather than further left.
+| Band, floor at z = 58 | Result |
+|---|---|
+| z < 12 | the left end leaves the top of the frame |
+| z = 12..40 | clear, full width — four rows at 7 voxels of pitch |
+| z > 40 | into the far wall's top corner, the highest thing the room draws |
 
-One more thing the font imposes, found the same way: `font.js` has **46 glyphs**
-— A–Z, 0–9 and `! + , - . / ? ( ) _`. There is no `|` and no `:`, and a missing
-glyph still advances the cursor, so a health bar built from pipes renders as an
-invisible row of spaces. Health is drawn with `line`; labels use `-` not `:`.
+**The tilt stays.** Levelling a row is easy to compute — the correction is
+linear in x and its slope is linear in z, both exact to a hundredth of a voxel
+— and it was built and thrown away. `print` puts a whole string down at one z,
+so levelling has to reach *inside* the string, emitting characters in runs that
+share a corrected z; every word then comes out as a staircase. A cleanly set
+line sitting at the angle its plane is seen at reads better than a level line
+made of ragged letters, and it is one draw call instead of nine. The lesson is
+that the tilt was never the bug. Four rows was.
 
-Two lines, 26 characters each:
+### 5.4b The second plane
+
+Four rows is one short, which is what pushed health off the top of the frame in
+the first place. Rather than tighten the pitch until the rows touch, the pips
+move **in front of** the room, onto a near slice at y = 104.
+
+Anything at y > 90 is nearer the camera than the largest node can reach, so the
+original occlusion argument holds and nothing can hide it. The wedge of frame
+below the room's near edge is exactly one row tall, and the row is found the
+same way the band was:
+
+| Row at y = 104 | Result |
+|---|---|
+| z ≤ 45 | the left end runs off the side of the frame, the right end into the room |
+| z = 46..49 | clear — up to 26 columns, x = 8..108 |
+| z ≥ 50 | off the bottom of the frame |
+
+It is the nearest plane anything in the game is drawn on, so the pips come out
+half again as large as the text above them — which suits health and armour,
+the two things you look at most, and would not have suited dialogue. Both
+qualities of the near slice, the one that made it wrong for text and the one
+that makes it right here, are the same fact about distance.
+
+One more consequence of the tilt, found on the title screen: **a block of
+centred rows is centred as a block**, every row starting at the same x, rather
+than each row centred on its own length. Otherwise the right-hand end of a long
+line lands at the same screen height as the left-hand end of the shorter line
+below it, and the two collide however generous the pitch. Sharing a left edge
+makes the gap between two rows the same at every x, so it cannot close.
+
+One more thing the font imposes: `font.js` has **50 glyphs** — A–Z, 0–9 and
+`! " ' ( ) + , - . / : ? _`. There is no `|`, and a missing glyph still
+advances the cursor, so a health bar built from pipes renders as an invisible
+row of spaces. Health is drawn with `line`. (`:` and `'` were added to the font
+after this section was first written; the harness reads the glyph set out of
+`font.js` rather than restating it, so authored text is checked against the
+font that ships.)
+
+Two lines, 24 characters each:
 
 ```
 I'M ALL BONE, NO PLAN
 SORRY IN ADVANCE
-I DIED DOING WHAT I LOVED
-WHICH WAS, REGRETTABLY, THIS
+I DIED DOING WHAT I LOVE
+WHICH WAS, SADLY, THIS
 OPEN ME. I AM DEFINITELY
 A CHEST.
-THAT'LL BE 40 GOLD, PLEASE
+THAT'LL BE 40 GOLD
 YOUR EXPENSES ARE DENIED
 I EXPECTED MORE FROM YOU
 ```
@@ -601,12 +675,23 @@ Six buttons is the whole input surface.
 - Z: open the **radial item ring** — hold Z, arrows select, release to use.
   One button, no cursor, no menus.
 
-HUD on the back wall at y = 2 (§5.4 on why, and on the band that is actually
-visible): health as pips, depth, gold, torch fuel as a shrinking bar. The
-**minimap** is the explored dungeon graph —
-chambers and corridors both — drawn with `line` on the same slice. Small, in a
-corner, and it is what gives back the sense of a whole level that the one-room
-view removes.
+The HUD is on two planes, and §5.4 is why. On the back wall at y = 2, four rows
+anchored at x = 0 and 7 voxels apart; on a near slice at y = 104, the one row
+that fits below the room:
+
+| Plane | Row | Left column, 24 characters | Right column, x ≥ 98 |
+|---|---|---|---|
+| y = 2 | 0 | depth, theme name, gold | torch fuel, a shrinking bar |
+| y = 2 | 1 | the held scroll | minimap |
+| y = 2 | 2 | speaker, or the pick-up prompt | ” |
+| y = 2 | 3 | the line itself, or the item's name | ” |
+| y = 104 | — | health pips, then armour pips | |
+
+The **minimap** is the explored dungeon graph — chambers and corridors both —
+drawn with `line` on the same slice. It has its own column rather than a free
+corner, because a bark is full-width and transient and the two would otherwise
+fight for the same voxels every time something spoke. That column is what sets
+the 24-character line: it is not the frame that runs out, it is the map.
 
 `rect` and `rectfill` are *not* implemented (`host.js:328` registers neither);
 they would silently become recording stubs and draw nothing. The minimap uses
@@ -645,17 +730,27 @@ light rebuild is 3.4 ms amortised over four frames.
 | Particles (`vset`) | 78 |
 | HUD, minimap, barks | 20 |
 
+Turning stone texture off (§2.1b) has moved that table since: the worst case is
+now **661 draw calls**, because runs the mottling was breaking up merge again.
+Against a budget that was never the binding constraint this is noise, and it is
+recorded only because the harness prints the number and an unexplained change
+in it should be a question. Note what it also says about the rejected HUD
+levelling in §5.4 — nine calls a line instead of one would have spent a third
+of that saving on making the text worse.
+
 ### 11.1 The harnesses
 
 `tools/cartlab.py` loads a cart under lupa with the canonical shim, so a test
 can call the cart's own functions and read its globals without any hooks in the
-cart itself. Three suites sit on top of it:
+cart itself. It installs the manifest's `config` block the same way the host
+does, deliberately: if the two boots disagree the harnesses are testing a cart
+nobody plays. Three suites sit on top of it:
 
 | Tool | Answers |
 |---|---|
 | `tools/deeper_structure.py` | 80 floors: is every node reachable, is every exit mirrored, does every door open onto walkable floor, does every node fit the grid and have a torch |
 | `tools/deeper_play.py` | scripted play, the survival probe, combat against all 19 monsters, every body plan and item through the draw path, every spell, 12 descents, worst-case frame cost |
-| `tools/deeper_items.py` | armour slots and the drain/repair loop, what floor 1 offers over 200 seeds, torch counts, monument placement and effects, the scroll prompt |
+| `tools/deeper_items.py` | armour slots and the drain/repair loop, what floor 1 offers over 200 seeds, torch counts, monument placement and effects, the scroll prompt, and every authored monument line against the shipped font and the row width |
 
 The survival probe is the difficulty regression test, and it has a known
 ceiling: its bot visits only ~3.7 of a floor's nodes, so it under-reports

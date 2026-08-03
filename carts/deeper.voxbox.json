@@ -29,5 +29,55 @@
 
   "_lighting": "Torchlight can be switched off from the title screen with z, and the choice is remembered in cartdata slot 2. Flat mode forces every light cell to one level, so the room is evenly lit and the pools disappear -- and the light map collapses from ~590 run-length boxes to 3, which makes it a performance option as well as a legibility one. The Pot Helm's -2 vision joke is inert while it is off.",
 
-  "_persistGlobals": "hiscore and best_depth go through cartdata/dget/dset. A mid-run resume would only need run_seed and depth, since the dungeon regenerates from its seed, but permadeath is the point."
+  "_persistGlobals": "hiscore and best_depth go through cartdata/dget/dset. A mid-run resume would only need run_seed and depth, since the dungeon regenerates from its seed, but permadeath is the point.",
+
+  "_config": "Arrives in the cart as the CONFIG global, installed before the chunk loads (host.js, luaLiteral). persistGlobals carries numbers out of a cart and back in; this is the other direction, and it carries tables and strings. Everything here is an override: the cart holds its own defaults and runs identically with no manifest at all, so dropping deeper.lua on the page alone still works. tools/cartlab.py installs the same block, so the harnesses test the text that actually ships.",
+
+  "_config_textures": "Per-flagstone mottling of walls and floors -- a plus/minus one nudge to the light level from an arithmetic hash, so it reads in every ramp rather than fighting the torchlight (VOXBOX_ROGUE_PLAN 2.1b). Off by default while the look is undecided: it also drops the floor's run count, since a flat-lit stretch collapses to one box again. Masonry banding and flagstone seams are structure, not texture, and are not affected.",
+
+  "_config_monuments": "Statue and shrine text, the one part of the cart that is pure content. Statues are text only, so the list can grow as long as you like for nothing. A shrine also names a kind, and only the four the cart implements do anything: heal (+8 health), torch (refills the torch), arm (repairs the worst piece you are wearing), gold (a handful of coins). An unrecognised kind still speaks and is still spent once -- it just has no effect -- so a typo degrades rather than crashes. Both fields are drawn in the HUD banner: names and lines are written to 24 characters, which is what fits a row on the back plane beside the minimap column, and the font is A-Z 0-9 and ! \" ' ( ) + , - . / : ? _ (runtime/js/font.js). Anything else advances the cursor and draws nothing.",
+
+  "config": {
+    "textures": false,
+
+    "statues": [
+      { "n": "a forgotten king",       "say": "HE LOOKS DISAPPOINTED" },
+      { "n": "a very large rat",       "say": "COMMISSIONED BY THE RAT" },
+      { "n": "bust of the architect",  "say": "HE PLANNED THE CORRIDORS" },
+      { "n": "an earlier hero",        "say": "NOT YOU. AN EARLIER ONE." },
+      { "n": "a weeping angel",        "say": "DON'T BLINK. ONLY JOKING" },
+      { "n": "a slime, in marble",     "say": "SURPRISINGLY LIFELIKE" },
+      { "n": "the dungeon manager",    "say": "PLAQUE: EMPLOYEE OF 1347" },
+      { "n": "two goblins arguing",    "say": "TITLED: THE STAND UP" },
+      { "n": "a hero, mid-sneeze",     "say": "CAUGHT AT A BAD MOMENT" },
+      { "n": "the unknown adventurer", "say": "NOBODY SIGNED THE BOOK" },
+      { "n": "a very smug wizard",     "say": "HE SAW THIS ONE COMING" },
+      { "n": "an empty plinth",        "say": "THE STATUE LEFT. NO NOTE" },
+      { "n": "a goblin on a horse",    "say": "NEITHER LOOKS PLEASED" },
+      { "n": "the first torchbearer",  "say": "HE RAN OUT ON THIS SPOT" },
+      { "n": "a stone dog",            "say": "GOOD BOY, ALLEGEDLY" },
+      { "n": "the committee",          "say": "SIX HEADS, ONE BUDGET" },
+      { "n": "a knight, face down",    "say": "HE TRIPPED. IT IS CARVED" },
+      { "n": "a bust of you",          "say": "SOMEHOW. DO NOT ASK." },
+      { "n": "the rat king, later",    "say": "IT DID NOT LAST" },
+      { "n": "a plaque, no statue",    "say": "FUNDING RAN OUT IN 1204" }
+    ],
+
+    "shrines": [
+      { "n": "shrine of small mercies",  "k": "heal",  "say": "YOU FEEL A BIT BETTER" },
+      { "n": "shrine of second wind",    "k": "heal",  "say": "THAT IS BETTER" },
+      { "n": "the bandage shrine",       "k": "heal",  "say": "PATCHED, MORE OR LESS" },
+      { "n": "a bowl of dungeon soup",   "k": "heal",  "say": "WARM. MOSTLY HARMLESS." },
+      { "n": "the forgotten offering",   "k": "heal",  "say": "THE DUNGEON OWED YOU ONE" },
+      { "n": "font of stale water",      "k": "torch", "say": "YOUR TORCH DRINKS DEEP" },
+      { "n": "the oil sump",             "k": "torch", "say": "THICK, BLACK, AND FREE" },
+      { "n": "brazier of last resort",   "k": "torch", "say": "IT CATCHES. GOOD." },
+      { "n": "altar of tidy kit",        "k": "arm",   "say": "YOUR KIT LOOKS TIDIER" },
+      { "n": "the lost property altar",  "k": "arm",   "say": "SOMEONE ELSE LEFT THIS" },
+      { "n": "the armourers rest",       "k": "arm",   "say": "DENTS HAMMERED OUT" },
+      { "n": "the lost sock reliquary",  "k": "gold",  "say": "A COIN. ODDLY WARM." },
+      { "n": "the tax collectors urn",   "k": "gold",  "say": "SOME OF IT COMES BACK" },
+      { "n": "a wishing well, dry",      "k": "gold",  "say": "A COIN. NO WISH." }
+    ]
+  }
 }

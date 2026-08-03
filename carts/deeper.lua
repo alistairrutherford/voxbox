@@ -52,7 +52,41 @@ FLOOR_Z  = 58            -- top surface of the floor slab
 FLOOR_B  = 62            -- bottom of the slab
 WALL_Z   = 46            -- top of a full-height wall
 SILL_Z   = 54            -- top of a near-edge sill wall
-HUD_Y    = 2             -- HUD is painted on the back plane, in that sky band
+-- The HUD is painted on two planes, and the reason there are two is worth
+-- stating, because the obvious single-plane answer was tried and was wrong.
+--
+-- The back plane at y = 2 is seen at 12 degrees of azimuth, so a row of
+-- constant z is not a row of constant screen height: the right-hand end sits
+-- nearer the camera and rides up the frame, and a full-width line comes out
+-- tilted by about ten voxels. Levelling it -- picking a z per character so the
+-- row is horizontal -- works, and looks worse: `print` puts a whole string
+-- down at one z, so levelling has to step *inside* the string and every word
+-- comes out as a staircase. A cleanly set line at the plane's own angle reads
+-- better than a level line made of ragged letters, so the tilt stays and the
+-- fix is to stop asking one band to hold everything.
+--
+-- Which leaves the question of where the rest goes. The band above the far
+-- wall is z = 12 .. 40 once rows are honest about their tilt: four rows, and
+-- the fifth was what pushed health off the top of the frame.
+--
+-- So health and armour move *in front of* the room, onto a near slice at
+-- y = 104. Anything at y > 90 is nearer the camera than the largest node can
+-- reach, so it cannot be occluded, and the wedge of frame below the room's
+-- near edge is exactly one row tall: z = 46..49 clears both the room and the
+-- bottom of the frame, and z = 45 or 50 does not. One row, up to 26 columns,
+-- and the font is half again as big there for being that much nearer.
+--
+-- Every number here is a property of the camera in deeper.voxbox.json. Change
+-- that and they have to be re-derived by projecting the plane; nothing in the
+-- cart can detect it, because the cart is never told where the camera is.
+HUD_Y    = 2             -- back plane, above the far wall
+HUD_TOP  = 12            -- first row; above this the left end leaves the frame
+HUD_ROW  = 7             -- 5 for the glyph, 2 of leading
+HUD_COLS = 24            -- characters per row before the minimap column
+HUD_MAPX = 98            -- minimap column, clear of a full-width line of text
+HUD_BY   = 104           -- near slice, in front of the room
+HUD_BZ   = 47            -- the one row that fits below it (46..49 clear)
+HUD_BX   = 8             -- and its left margin, in from the frame edge
 
 MOVE_FR  = 5             -- frames a tile step takes
 MAX_PART = 80            -- particle cap: each one is a vset
@@ -68,26 +102,48 @@ DIVE_HEAL = 8            -- restored on reaching a new floor
 DIVE_MAX  = 2            -- and permanent max health for getting there
 AGGRO     = 6            -- tiles at which a monster notices you
 
+-- CONFIG arrives from carts/deeper.voxbox.json, installed by the host before
+-- this chunk loads (host.js, luaLiteral) and by tools/cartlab.py for the
+-- harnesses. It is an override and never a dependency: dropped on the page on
+-- its own, with no manifest beside it, the cart sees CONFIG = nil and every
+-- default below still applies.
+function cfg(key, dflt)
+  if CONFIG == nil then return dflt end
+  local v = CONFIG[key]
+  if v == nil then return dflt end
+  return v
+end
+
+-- Per-flagstone mottling of walls and floors (see light_alloc). Off by
+-- default while the look is undecided -- and it is a run-count saving as well
+-- as a look, since a flat-lit stretch of floor collapses back to one box.
+TEXTURES = cfg("textures", false) == true
+
 -- Some pillars are not pillars. A monument occupies a wall tile like any
 -- other pillar -- it blocks, it casts, it is drawn where the pillar was -- but
 -- bumping it says something, and a shrine does something once.
-STATUES = {
+--
+-- Both lists are content, not code, so they live in the manifest and these are
+-- only the fallback. Statues are text alone and the list can grow for nothing;
+-- a shrine also names a kind, and only the four prop_touch implements do
+-- anything. Names and lines are written to fit HUD_COLS.
+STATUES = cfg("statues", {
   { n = "a forgotten king",  say = "HE LOOKS DISAPPOINTED" },
   { n = "a very large rat",  say = "COMMISSIONED BY THE RAT" },
   { n = "bust of the architect", say = "HE PLANNED THE CORRIDORS" },
   { n = "an earlier hero",   say = "NOT YOU. AN EARLIER ONE." },
-  { n = "a weeping angel",   say = "DO NOT BLINK. ONLY JOKING" },
+  { n = "a weeping angel",   say = "DON'T BLINK. ONLY JOKING" },
   { n = "a slime, in marble", say = "SURPRISINGLY LIFELIKE" },
   { n = "the dungeon manager", say = "PLAQUE: EMPLOYEE OF 1347" },
   { n = "two goblins arguing", say = "TITLED: THE STAND UP" },
-}
-SHRINES = {
+})
+SHRINES = cfg("shrines", {
   { n = "shrine of small mercies", k = "heal",  say = "YOU FEEL A BIT BETTER" },
   { n = "font of stale water",     k = "torch", say = "YOUR TORCH DRINKS DEEP" },
   { n = "altar of tidy kit",       k = "arm",   say = "YOUR KIT LOOKS TIDIER" },
   { n = "the lost sock reliquary", k = "gold",  say = "A COIN. ODDLY WARM." },
   { n = "shrine of second wind",   k = "heal",  say = "THAT IS BETTER" },
-}
+})
 
 ARM_KINDS = { "helm", "chest", "shield" }
 ARM_MSG = { helm = "A PROPER HELM", chest = "BREASTPLATE ON", shield = "SHIELD UP" }
@@ -450,12 +506,18 @@ function light_alloc()
   -- would fight the torchlight and look wrong in half the themes. Derived from
   -- an arithmetic hash, not rnd(), so it does not disturb the PRNG stream that
   -- the dungeon seed depends on.
+  --
+  -- Switched off in the manifest it stays allocated and all zero, so the RLE
+  -- and wall passes read it unconditionally and cost nothing extra -- and with
+  -- every tile at its true light level, neighbouring runs merge again.
   mottle = grid(node.w, node.h, 0)
-  for ty = 0, node.h - 1 do
-    local mrow = mottle[ty]
-    for tx = 0, node.w - 1 do
-      local h = (tx * 73 + ty * 151 + node_idx * 37) % 19
-      mrow[tx] = (h < 4) and -1 or ((h > 14) and 1 or 0)
+  if TEXTURES then
+    for ty = 0, node.h - 1 do
+      local mrow = mottle[ty]
+      for tx = 0, node.w - 1 do
+        local h = (tx * 73 + ty * 151 + node_idx * 37) % 19
+        mrow[tx] = (h < 4) and -1 or ((h > 14) and 1 or 0)
+      end
     end
   end
 end
@@ -1312,13 +1374,16 @@ function prop_touch(p)
     return
   end
   p.used = true
+  -- Four kinds, and an unrecognised one still speaks and is still spent: the
+  -- list is authored in the manifest, so a typo there should read as a shrine
+  -- that did nothing much rather than stop the game.
   if sh.k == "heal" then
     hp = min(hpmax, hp + 8)
   elseif sh.k == "torch" then
     torchfuel = 400
   elseif sh.k == "gold" then
     gold = gold + 20 + irnd(30)
-  else
+  elseif sh.k == "arm" then
     -- repairs the most damaged piece you are actually wearing, which ties the
     -- shrine to the armour slots rather than inventing a second currency
     local wk, wv = nil, 99
@@ -1543,45 +1608,62 @@ function die(by)
 end
 
 -- ================================================================== 14_hud ==
+-- Nothing here is levelled: every line is one `print` at one z, so it is set
+-- cleanly and sits at the angle its plane is seen at. See the note beside
+-- HUD_Y for why the alternative was rejected, and for the two planes.
+function hrow(i) return HUD_TOP + i * HUD_ROW end
+
 function hud_draw()
-  set_draw_slice(HUD_Y)
-  -- Health is drawn, not printed. The host's font is 46 glyphs (font.js) and
-  -- has no "|" or ":"; a missing glyph still advances the cursor, so a bar
-  -- built out of pipes comes out as an invisible row of spaces.
+  -- ---- the near slice, in front of the room: health and armour ----------
+  -- Health is drawn, not printed. The host's font has no "|", and a missing
+  -- glyph still advances the cursor, so a bar built out of pipes comes out as
+  -- an invisible row of spaces.
   -- Pips show max health as well as current: the empty ones are what tells
   -- you a draught is worth drinking and that diving raised the ceiling.
-  -- Armour gets its own row of pips beside them, because it is the other half
-  -- of how long you live and a number buried in a text line does not read as
+  -- Armour gets its own group beside them, because it is the other half of how
+  -- long you live and a number buried in a text line does not read as
   -- something you should go looking for.
+  --
+  -- They are down here rather than up in the sky band because they are what
+  -- you look at most and there is exactly one row of frame below the room to
+  -- put them in. It is also the nearest plane anything is drawn on, so they
+  -- come out half again as large as the text above.
+  set_draw_slice(HUD_BY)
   for i = 1, min(hpmax, 20) do
-    local x = 4 + (i - 1) * 3
+    local x = HUD_BX + (i - 1) * 3
     local lit = i <= hp
-    line(x, 7, x + 1, 7, lit and (hp > 3 and 8 or 14) or 5)
-    line(x, 8, x + 1, 8, lit and (hp > 3 and 14 or 8) or 1)
+    line(x, HUD_BZ, x + 1, HUD_BZ, lit and (hp > 3 and 8 or 14) or 5)
+    line(x, HUD_BZ + 1, x + 1, HUD_BZ + 1, lit and (hp > 3 and 14 or 8) or 1)
   end
   for i = 1, min(arm, 10) do
-    local x = 76 + (i - 1) * 4
-    line(x, 7, x + 2, 7, 6)
-    line(x, 8, x + 2, 8, 13)
+    local x = HUD_BX + 64 + (i - 1) * 4
+    line(x, HUD_BZ, x + 2, HUD_BZ, 6)
+    line(x, HUD_BZ + 1, x + 2, HUD_BZ + 1, 13)
   end
 
-  print("d" .. depth .. " " .. theme.name .. "  g" .. gold, 4, 12, theme.acc)
+  -- ---- the back plane, above the far wall: everything else -------------
+  set_draw_slice(HUD_Y)
+  print("d" .. depth .. " " .. theme.name .. "  g" .. gold, 0, hrow(0), theme.acc)
 
   -- torch fuel, the clock that makes the light map a mechanic
-  local fw = flr(torchfuel / 400 * 30)
-  line(92, 12, 122, 12, 5)
-  if fw > 0 then line(92, 12, 92 + fw, 12, torchfuel > 80 and 9 or 8) end
+  local fw = flr(torchfuel / 400 * 28)
+  line(HUD_MAPX, hrow(0) + 2, HUD_MAPX + 28, hrow(0) + 2, 5)
+  if fw > 0 then
+    line(HUD_MAPX, hrow(0) + 2, HUD_MAPX + fw, hrow(0) + 2,
+         torchfuel > 80 and 9 or 8)
+  end
 
   if #spells > 0 then
-    print("z-" .. SPELLINFO[spells[1]].n, 4, 20, SPELLINFO[spells[1]].c)
+    print("z-" .. SPELLINFO[spells[1]].n, 0, hrow(1), SPELLINFO[spells[1]].c)
   end
 
   if pending then
-    print("pick up?  x yes  z no", 4, 28, 10)
-    print(sub(ITEMS[pending.ii].n, 1, 22), 4, 35, SPELLINFO[ITEMS[pending.ii].s].c)
+    print("pick up?  x yes  z no", 0, hrow(2), 10)
+    print(sub(ITEMS[pending.ii].n, 1, HUD_COLS), 0, hrow(3),
+          SPELLINFO[ITEMS[pending.ii].s].c)
   elseif bark_t > 0 then
-    print(sub(bark_who, 1, 22), 4, 28, 6)
-    print(sub(bark_txt, 1, 22), 4, 35, 7)
+    print(sub(bark_who, 1, HUD_COLS), 0, hrow(2), 6)
+    print(sub(bark_txt, 1, HUD_COLS), 0, hrow(3), 7)
   end
 
   minimap()
@@ -1589,13 +1671,17 @@ end
 
 -- The explored graph, chambers and corridors alike. `rect` is not implemented
 -- by the host, so boxes are four `line` calls.
+--
+-- It sits in its own column to the right of HUD_COLS so it never has to fight
+-- a full-width bark for the same voxels, and below the torch bar. The pitch is
+-- what fits a 4 x 3 lattice into what is left: 8 across, 6 down.
 function minimap()
-  local bx, bz = 96, 24
+  local bx, bz = HUD_MAPX, hrow(1)
   for i = 1, #nodes do
     local n = nodes[i]
     if n.seen then
       local x = bx + flr(n.gx * 8)
-      local z = bz + flr(n.gy * 8)
+      local z = bz + flr(n.gy * 6)
       local w = n.kind == "corr" and 2 or 5
       local c = (i == node_idx) and 10 or (i == stair_node and 11 or 5)
       line(x, z, x + w, z, c)
@@ -1606,9 +1692,22 @@ function minimap()
   end
 end
 
-function banner(txt, z, c)
+-- A block of centred rows is centred *as a block*, every row starting at the
+-- same x, rather than each row centred on its own length. On a plane seen at
+-- an angle that is not a style choice: a row drawn at one z descends to the
+-- right, so the right-hand end of a long line lands at the same height as the
+-- left-hand end of the shorter line below it, and the two collide however
+-- generous the pitch. Sharing a left edge makes the gap between two rows the
+-- same at every x, so it cannot close.
+function block_x(lines)
+  local w = 0
+  for i = 1, #lines do w = max(w, #lines[i]) end
+  return max(0, min(64 - w * 2, 128 - w * 4))
+end
+
+function banner(txt, row, c, x)
   set_draw_slice(HUD_Y)
-  print(txt, 64 - #txt * 2, z, c)
+  print(txt, x or 0, row, c)
 end
 
 -- ================================================================= 15_game ==
@@ -1772,11 +1871,19 @@ end
 
 function death_draw()
   set_draw_slice(HUD_Y)
-  -- same four rows the HUD uses; below z = 28 the room hides the left half
-  banner("you died", 7, 8)
-  banner("killed by " .. (killer or "the dark"), 14, 7)
-  banner("depth " .. depth .. "  score " .. score, 21, 7)
-  if modet > 90 and frame % 40 < 26 then banner("press x", 28, 10) end
+  -- the same rows the HUD uses, and for the same reason: below them the far
+  -- wall is in the way
+  local l = {
+    "you died",
+    sub("killed by " .. (killer or "the dark"), 1, HUD_COLS),
+    "depth " .. depth .. "  score " .. score,
+    "press x",
+  }
+  local x = block_x(l)
+  banner(l[1], hrow(0), 8, x)
+  banner(l[2], hrow(1), 7, x)
+  banner(l[3], hrow(2), 7, x)
+  if modet > 90 and frame % 40 < 26 then banner(l[4], hrow(3), 10, x) end
 end
 
 function title_draw()
@@ -1797,11 +1904,25 @@ function title_draw()
     vset(flr(64 + cos(a) * 44), flr(46 - sin(a) * 30), FLOOR_Z - 1, 9)
   end
   set_draw_slice(HUD_Y)
-  banner("deeper", 5, 10)
-  banner("a voxbox roguelike", 11, 12)
-  banner("arrows move and attack", 20, 7)
-  banner("x confirm   z cast", 27, 7)
-  banner("best depth " .. best_depth .. "  hi " .. hiscore, 34, 6)
-  banner("z  torchlight " .. (lightfx and "on" or "off"), 41, lightfx and 10 or 6)
-  if frame % 40 < 26 then banner("press x to start", 48, 10) end
+  -- Seven rows rather than the HUD's four, at a tighter pitch and starting a
+  -- voxel higher: there is no wall here, only the demo slab, so the band runs
+  -- on to z = 57 before the slab starts eating the low end of a line.
+  local function trow(i) return HUD_TOP - 1 + i * 7 end
+  local l = {
+    "deeper",
+    "a voxbox roguelike",
+    "arrows move and attack",
+    "x confirm   z cast",
+    "best depth " .. best_depth .. "  hi " .. hiscore,
+    "z  torchlight " .. (lightfx and "on" or "off"),
+    "press x to start",
+  }
+  local x = block_x(l)
+  banner(l[1], trow(0), 10, x)
+  banner(l[2], trow(1), 12, x)
+  banner(l[3], trow(2), 7, x)
+  banner(l[4], trow(3), 7, x)
+  banner(l[5], trow(4), 6, x)
+  banner(l[6], trow(5), lightfx and 10 or 6, x)
+  if frame % 40 < 26 then banner(l[7], trow(6), 10, x) end
 end
