@@ -645,6 +645,22 @@ light rebuild is 3.4 ms amortised over four frames.
 | Particles (`vset`) | 78 |
 | HUD, minimap, barks | 20 |
 
+### 11.1 The harnesses
+
+`tools/cartlab.py` loads a cart under lupa with the canonical shim, so a test
+can call the cart's own functions and read its globals without any hooks in the
+cart itself. Three suites sit on top of it:
+
+| Tool | Answers |
+|---|---|
+| `tools/deeper_structure.py` | 80 floors: is every node reachable, is every exit mirrored, does every door open onto walkable floor, does every node fit the grid and have a torch |
+| `tools/deeper_play.py` | scripted play, the survival probe, combat against all 19 monsters, every body plan and item through the draw path, every spell, 12 descents, worst-case frame cost |
+| `tools/deeper_items.py` | armour slots and the drain/repair loop, what floor 1 offers over 200 seeds, torch counts, monument placement and effects, the scroll prompt |
+
+The survival probe is the difficulty regression test, and it has a known
+ceiling: its bot visits only ~3.7 of a floor's nodes, so it under-reports
+anything that depends on exploring. Read it as a worst case, not an average.
+
 **Build the instrument first.** Phase 0 adds a per-frame primitive counter to
 the host's stats line — an idea already outstanding in this repo, and this is
 the cart that needs it. Without it, "is the room too expensive?" is a matter of
