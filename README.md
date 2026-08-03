@@ -159,7 +159,11 @@ hunting you, because one rate cannot do both jobs without turning the retreat
 into a long walk. Bread and draughts heal properly, and reaching a new floor
 restores health and raises the ceiling.
 
-Armour is the second bar, and it subtracts from every hit. Torchlight can be
+Armour is the second bar, and it subtracts from every hit. It is three slots —
+helm, chest, shield — not a running total, so a piece only helps if it beats
+what is in its slot and the best possible loadout is 7. A wraith damages the
+best piece rather than the total, which means repairing it is the same act as
+finding it in the first place. Torchlight can be
 switched off entirely from the title screen if you would rather see the whole
 room — which also collapses the light map from ~590 boxes to 3.
 

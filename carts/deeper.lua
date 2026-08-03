@@ -63,6 +63,9 @@ DIVE_HEAL = 8            -- restored on reaching a new floor
 DIVE_MAX  = 2            -- and permanent max health for getting there
 AGGRO     = 6            -- tiles at which a monster notices you
 
+ARM_KINDS = { "helm", "chest", "shield" }
+ARM_MSG = { helm = "A PROPER HELM", chest = "BREASTPLATE ON", shield = "SHIELD UP" }
+
 -- Flat-light mode: every cell forced to one level, so the room is evenly lit
 -- and the torch pools vanish. Toggled on the title screen and remembered in
 -- cartdata. Also much cheaper, since the light map collapses to one run a row.
@@ -638,10 +641,23 @@ function hero_init()
   -- makes the first floor harmless. The fix for dying on floor 1 was making
   -- armour findable there, not handing it over.
   gold, arm, dmg = 0, 0, 2
+  armv = { helm = 0, chest = 0, shield = 0 }
   helm, chest, shield, helm_pot = false, false, false, false
   torchfuel = 250
   spells = {}
   spell_light, spell_conf, spell_chicken, spell_swap = 0, 0, 0, 0
+end
+
+-- arm is derived, never assigned directly: it was a bare counter that every
+-- pickup added to, so duplicate helms stacked without limit and armour reached
+-- 56 by floor 6 -- past that, every monster in the game does the minimum 1
+-- damage and the difficulty is simply off.
+function arm_sync()
+  arm = armv.helm + armv.chest + armv.shield
+  helm = armv.helm > 0
+  chest = armv.chest > 0
+  shield = armv.shield > 0
+  if not helm then helm_pot = false end
 end
 
 function hero_place(dir)
@@ -851,10 +867,13 @@ ITEMS = {
   { n = "gold",         k = "gold" },
   { n = "bread",        k = "heal", v = 6 },
   { n = "torch oil",    k = "oil",  v = 120 },
-  { n = "pot helm",     k = "helm", pot = true },
-  { n = "steel helm",   k = "helm" },
-  { n = "breastplate",  k = "chest" },
-  { n = "kite shield",  k = "shield" },
+  -- v is the slot rating, not a bonus: armour is three slots, and a piece
+  -- replaces what is in its slot only if it is better. Best possible loadout
+  -- is 2 + 3 + 2 = 7, which is the number the whole damage curve is tuned to.
+  { n = "pot helm",     k = "helm",   v = 1, pot = true },
+  { n = "steel helm",   k = "helm",   v = 2 },
+  { n = "breastplate",  k = "chest",  v = 3 },
+  { n = "kite shield",  k = "shield", v = 2 },
   { n = "scroll of fireball",  k = "spell", s = "fireball" },
   { n = "scroll of light",     k = "spell", s = "light" },
   { n = "mild inconvenience", k = "spell", s = "annoy" },
@@ -919,27 +938,22 @@ function item_take(it)
     torchfuel = min(400, torchfuel + d.v)
     say("you", "TORCH TOPPED UP")
     sfx_safe("potion_powerup")
-  elseif d.k == "helm" then
-    helm = true
-    helm_pot = d.pot and true or false
-    arm = arm + (d.pot and 1 or 2)
-    say("you", d.pot and "IT FITS. YOU CANT SEE" or "A PROPER HELM")
-    sfx_safe("armour_equip")
-  elseif d.k == "chest" then
-    chest = true
-    arm = arm + 3
-    say("you", "BREASTPLATE ON")
-    sfx_safe("armour_equip")
-  elseif d.k == "shield" then
-    shield = true
-    arm = arm + 2
-    say("you", "SHIELD UP")
+  elseif d.k == "helm" or d.k == "chest" or d.k == "shield" then
+    if d.v <= armv[d.k] then
+      say("you", "ALREADY WEARING BETTER")
+      return false                       -- leave it on the floor, unclaimed
+    end
+    armv[d.k] = d.v
+    if d.k == "helm" then helm_pot = d.pot and true or false end
+    arm_sync()
+    say("you", d.pot and "IT FITS. YOU CANT SEE" or ARM_MSG[d.k])
     sfx_safe("armour_equip")
   elseif d.k == "spell" then
     add(spells, d.s)
     say("you", "TOOK " .. d.n)
     sfx_safe("scroll_pickup")
   end
+  return true
 end
 
 -- ============================================================== 09_spells ==
@@ -1086,8 +1100,7 @@ function try_move(dir)
   hero.anim = MOVE_FR
   for i = #n.items, 1, -1 do
     local it = n.items[i]
-    if it.x == nx and it.y == ny then
-      item_take(it)
+    if it.x == nx and it.y == ny and item_take(it) then
       deli(n.items, i)
     end
   end
@@ -1188,8 +1201,19 @@ function mon_attack(m, b)
     return
   end
   if b.drain and arm > 0 then
-    arm = max(0, arm - 1)
-    say(b.n, "LET ME TAKE THAT")
+    -- damages the best piece by a point rather than shaving a counter, so the
+    -- repair path is the same as the acquisition path: find another of that
+    -- kind and it replaces the damaged one
+    local bk, bv = nil, 0
+    for i = 1, #ARM_KINDS do
+      local k = ARM_KINDS[i]
+      if armv[k] > bv then bk, bv = k, armv[k] end
+    end
+    if bk then
+      armv[bk] = bv - 1
+      arm_sync()
+      say(b.n, "LET ME TAKE THAT")
+    end
   end
   hp = hp - hit
   sfx_safe("player_hurt")

@@ -318,15 +318,36 @@ how much you have to earn them:
 | Bread, healing draught | +6, +14 | the common drop; food is deliberately frequent in the loot table |
 | Reaching a new floor | +8, and +2 max | makes the stairs worth pushing for rather than something you fall down at 2 hp |
 
-**Armour is the other half of survival** and gets its own row of HUD pips beside
-health, because a number buried in a text line does not read as something worth
-going to look for. It subtracts from every hit, with a floor of 1 damage.
+### 4.2 Armour
 
-That floor is why the hero starts with **zero** armour: a single point reduces
-every depth-1 monster to the minimum and makes the first floor harmless. The
-fix for dying on floor 1 was making armour *findable* there — every piece used
-to be gated behind `d >= 2`, so the one floor where you had none was also the
-only floor where none could drop.
+**Three slots, not a counter** — helm, chest, shield — each holding at most one
+piece, rated rather than additive. A piece replaces what is in its slot only if
+it is better; a worse duplicate is refused and left on the floor. Best possible
+loadout is 2 + 3 + 2 = **7**, and that is the number the damage curve is tuned
+against.
+
+It was a bare counter first, and every pickup added to it. Since the equipped
+flags were set but never *read*, duplicates stacked without limit: taking every
+piece a floor offers reached **armour 56 by floor 6**, and with damage floored
+at 1 that means every monster in the game does the minimum from floor 2 onward.
+The difficulty was switching itself off and nothing said so.
+
+Progression falls out of what each floor can drop: helms from floor 1
+(max 2), breastplates from floor 2 (max 5), shields from floor 3 (max 7).
+
+The wraith's drain damages the *best piece* by a point rather than shaving the
+total, which gives repair a path identical to acquisition: find another of that
+kind and it replaces the damaged one. Nothing else restores armour, and nothing
+needs to.
+
+Armour gets its own row of HUD pips beside health, because a number buried in a
+text line does not read as something worth going to look for.
+
+The damage floor of 1 is why the hero starts with **zero** armour: a single
+point reduces every depth-1 monster to the minimum and makes the first floor
+harmless. The fix for dying on floor 1 was making armour *findable* there —
+every piece used to be gated behind `d >= 2`, so the one floor where you had
+none was also the only floor where none could drop.
 
 Max health rising with depth is also what keeps the numbers honest as monster
 damage scales, and the HUD pips show empty slots as well as full ones so both
