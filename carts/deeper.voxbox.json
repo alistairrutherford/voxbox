@@ -17,11 +17,11 @@
     "corridors are places too, and things live in them"
   ],
 
-  "_camera": "Three-quarter isometric: 22 degrees of azimuth and 38 of elevation, 200 out. The elevation is what shows the floor plan; the azimuth is deliberately modest rather than the textbook 45, because the HUD and all the dialogue are drawn on a y-slice, and a slice seen at 45 degrees skews the 3x5 font past comfortable reading. 22 keeps the isometric read and the text legible. fov 42 frames a node filling the whole 120 x 120 voxel footprint; the target is aimed at the floor rather than mid-air so the room sits centred and the sky band above it stays in shot.",
+  "_camera": "Three-quarter isometric: 12 degrees of azimuth and 38 of elevation. The elevation is what shows the floor plan; the azimuth is deliberately modest rather than the textbook 45, because the HUD and all the dialogue are drawn on a y-slice and a slice seen at 45 degrees skews the 3x5 font past comfortable reading. Framing was solved numerically rather than eyeballed: project the eight corners of a full-grid node, translate the camera along its own right/up axes until that box is centred, then shrink fov until it just fits. The first hand-tuned camera used 83 percent of the width and was off-centre enough to clip one edge while wasting the other; this uses 96 percent of the width and 89 of the height.",
   "camera": {
-    "pos": [123, 204, -77],
-    "target": [58, 64, 52],
-    "fov": 42
+    "pos": [90, 191, -67],
+    "target": [59, 45, 50],
+    "fov": 35
   },
 
   "_groundZ": "Pinned to the floor slab. Auto-derivation would work in a plain room, but a node full of pillars and sill walls shifts the mode of the topmost voxels and the drop shadows jump between rooms. Pinning keeps hero and monster shadows on the floor where they belong.",

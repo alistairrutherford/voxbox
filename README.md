@@ -119,7 +119,10 @@ shapes have walls the claw cannot rotate past; closed ones wrap.
 
 ### deeper
 
-A turn-based roguelike, drawn isometrically, one dungeon node per volume.
+A turn-based roguelike, drawn isometrically, one dungeon node per volume. The
+play area is a wide 21 x 15 grid rather than a square one, because a square
+footprint at this camera projects to a square and the screen is not: wide fills
+97% of the frame and still leaves a strip at the top for the HUD.
 Randomly generated floors of chambers and corridors, wearable armour you can
 see on the character, joke spells with real mechanics, and a menagerie of
 monsters and ghosts who talk back. Descend far enough and the themes change

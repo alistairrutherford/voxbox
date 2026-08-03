@@ -28,7 +28,12 @@
 
 -- =============================================================== 01_config ==
 TS       = 6             -- tile size in voxels
-GW, GH   = 21, 21        -- grid capacity: 126 x 126 voxels of a 128 volume
+-- Wide, not square. A square footprint at this camera projects to something
+-- nearly square, but the screen is 4:3 -- so filling the width overflowed the
+-- height and left no room for a HUD. 21 x 15 projects to roughly the frame's
+-- own shape: 97% of the width used, with a quarter of the height left clear
+-- above the room for the HUD to live in.
+GW, GH   = 21, 15
 OX, OY   = 1, 1          -- voxel origin of tile (0,0)
 
 -- Light is computed on its own grid, *per voxel*, not per tile. Tile size is
@@ -183,7 +188,7 @@ function floor_build(d)
     local c = cells[i]
     local n = {
       kind = "room", gx = c.x, gy = c.y, exits = {}, seen = false,
-      w = 15 + irnd(5), h = 14 + irnd(6),
+      w = 18 + irnd(4), h = 12 + irnd(4),
     }
     c.node = i
     add(nodes, n)
@@ -231,8 +236,8 @@ function floor_build(d)
     local n = {
       kind = "corr", exits = {}, seen = false,
       gx = (a.x + b.x) / 2, gy = (a.y + b.y) / 2,
-      w = horiz and (17 + irnd(3)) or 3,
-      h = horiz and 3 or (15 + irnd(5)),
+      w = horiz and (19 + irnd(3)) or 3,
+      h = horiz and 3 or (11 + irnd(5)),
     }
     add(nodes, n)
     local ci = #nodes
@@ -279,8 +284,10 @@ end
 
 -- One node's tile grid. Corridors and chambers go through here identically.
 function node_build(n, d)
-  n.w = min(n.w, GW - 2)
-  n.h = min(n.h, GH - 2)
+  -- clamped to the grid itself, not one tile inside it: the camera is framed
+  -- on the full grid, so a node that stops short of it wastes screen
+  n.w = min(n.w, GW)
+  n.h = min(n.h, GH)
   n.ox = flr((GW - n.w) / 2)          -- centre the node in the grid
   n.oy = flr((GH - n.h) / 2)
   n.tile = grid(n.w, n.h, T_FLOOR)
@@ -654,10 +661,20 @@ function room_draw()
     boxfill(lx2v(r.x0), ly2v(r.ly0), FLOOR_Z,
             lx2v(r.x1) + LS - 1, ly2v(r.ly1) + LS - 1, FLOOR_B, r.c)
   end
+  -- Walls get three bands rather than one flat slab: a capping course on top,
+  -- the body, and a skirting at the floor. Each is one extra boxfill per run,
+  -- and the renderer's per-face shading does the rest -- it is the cheapest
+  -- way to make masonry read as built rather than extruded.
+  local capc = RAMPS[theme.cold][4]
   for r in all(wruns) do
-    boxfill(vx(r.x0), vy(r.ty), r.near and SILL_Z or WALL_Z,
-            vx(r.x1) + TS - 1, vy(r.ty) + TS - 1, FLOOR_Z - 1, r.c)
+    local top = r.near and SILL_Z or WALL_Z
+    local x0, x1 = vx(r.x0), vx(r.x1) + TS - 1
+    local y0, y1 = vy(r.ty), vy(r.ty) + TS - 1
+    boxfill(x0, y0, top, x1, y1, FLOOR_Z - 1, r.c)
+    boxfill(x0, y0, top, x1, y1, top, capc)                    -- capping course
+    boxfill(x0, y0, FLOOR_Z - 2, x1, y1, FLOOR_Z - 1, theme.acc)  -- skirting
   end
+  seams_draw()
   for t in all(n.torch) do torch_draw(t) end
   for p in all(n.props) do prop_draw(p) end
   if n.stair then stairs_draw(n.stair) end
@@ -665,27 +682,19 @@ end
 
 -- Drawn standing on the pillar tile it replaced, taller than the wall around
 -- it so it reads as a monument rather than masonry.
-function prop_draw(p)
-  local x, y = vx(p.x) + 3, vy(p.y) + 3
-  local l = clamp(cell_light(p.x, p.y), 0, 3)
-  if p.kind == "statue" then
-    local c = RAMPS.bone[l + 1]
-    boxfill(x - 2, y - 2, 52, x + 2, y + 2, 57, RAMPS.cold[l + 1])   -- plinth
-    boxfill(x - 1, y - 1, 46, x + 1, y + 1, 51, c)                   -- body
-    boxfill(x - 1, y - 1, 43, x + 1, y + 1, 45, c)                   -- head
-    vset(x - 1, y + 1, 44, 0)                                        -- eyes,
-    vset(x + 1, y + 1, 44, 0)                                        -- on the near face
-  else
-    local lit = p.used and 5 or 10
-    local c = RAMPS[theme.warm][l + 1]
-    boxfill(x - 2, y - 2, 53, x + 2, y + 2, 57, RAMPS.cold[l + 1])
-    boxfill(x - 1, y - 1, 48, x + 1, y + 1, 52, c)
-    boxfill(x - 1, y - 1, 45, x + 1, y + 1, 47, p.used and 5 or theme.acc)
-    if not p.used then
-      local a = frame * 0.012
-      vset(flr(x + cos(a) * 3), flr(y - sin(a) * 3), 44, lit)
-      vset(flr(x - cos(a) * 3), flr(y + sin(a) * 3), 44, lit)
-    end
+-- Flagstone seams: one long box per major gridline rather than per tile edge.
+-- Every tile edge would be right, and would also multiply the floor's run
+-- count several times over; every third is enough to read as large slabs.
+function seams_draw()
+  local n = node
+  local c = RAMPS[theme.cold][2]
+  local x0, x1 = vx(1), vx(n.w - 1) - 1
+  local y0, y1 = vy(1), vy(n.h - 1) - 1
+  for ty = 3, n.h - 2, 3 do
+    boxfill(x0, vy(ty), FLOOR_Z, x1, vy(ty), FLOOR_Z, c)
+  end
+  for tx = 3, n.w - 2, 3 do
+    boxfill(vx(tx), y0, FLOOR_Z, vx(tx), y1, FLOOR_Z, c)
   end
 end
 
@@ -716,6 +725,47 @@ function torch_draw(t)
   boxfill(bx - 1, by - 1, 49, bx + 1, by + 1, 50, 8)
   boxfill(bx, by, 47 - (f % 2), bx, by, 49, cols[f + 1])
   vset(bx, by, 46 - (f % 2), 10)
+end
+
+function prop_draw(p)
+  local x, y = vx(p.x) + 3, vy(p.y) + 3
+  local l = clamp(cell_light(p.x, p.y), 0, 3)
+  local stone = RAMPS.cold[l + 1]
+  local dark = RAMPS.cold[max(l, 1)]
+
+  if p.kind == "statue" then
+    local c = RAMPS.bone[l + 1]
+    local hi = RAMPS.bone[min(l + 2, 4)]
+    -- stepped plinth with an inscription band, then a figure on top of it
+    boxfill(x - 3, y - 3, 55, x + 3, y + 3, 57, stone)
+    boxfill(x - 2, y - 2, 52, x + 2, y + 2, 54, dark)
+    boxfill(x - 2, y + 2, 53, x + 2, y + 2, 53, theme.acc)     -- brass plaque
+    boxfill(x - 2, y - 2, 46, x + 2, y + 2, 51, c)             -- robed body
+    boxfill(x - 3, y - 1, 47, x - 3, y + 1, 50, c)             -- arms folded
+    boxfill(x + 3, y - 1, 47, x + 3, y + 1, 50, c)
+    boxfill(x - 1, y - 1, 41, x + 1, y + 1, 45, hi)            -- head and neck
+    boxfill(x - 2, y - 2, 40, x + 2, y + 2, 41, hi)            -- a crown or brow
+    vset(x - 1, y + 2, 43, 0)                                  -- carved eyes
+    vset(x + 1, y + 2, 43, 0)
+  else
+    local c = RAMPS[theme.warm][l + 1]
+    local live = not p.used
+    boxfill(x - 3, y - 3, 55, x + 3, y + 3, 57, stone)          -- base
+    boxfill(x - 2, y - 2, 51, x + 2, y + 2, 54, dark)           -- column
+    boxfill(x - 3, y - 3, 49, x + 3, y + 3, 50, stone)          -- bowl rim
+    boxfill(x - 2, y - 2, 50, x + 2, y + 2, 50, live and theme.acc or 5)
+    if live then
+      -- a flame in the bowl, and two motes going round it
+      local f = flr(frame / 4) % 3
+      boxfill(x - 1, y - 1, 46 - f, x + 1, y + 1, 49, 9)
+      boxfill(x, y, 44 - f, x, y, 46, 10)
+      local a2 = frame * 0.012
+      vset(flr(x + cos(a2) * 4), flr(y - sin(a2) * 4), 47, 10)
+      vset(flr(x - cos(a2) * 4), flr(y + sin(a2) * 4), 47, 7)
+    else
+      boxfill(x - 1, y - 1, 48, x + 1, y + 1, 49, 5)            -- cold ashes
+    end
+  end
 end
 
 -- ============================================================== 06_hero ==
@@ -900,35 +950,67 @@ function mon_draw(m)
   local hi = RAMPS[b.ramp][min(l + 2, 4)]
   local bob = flr(frame / 4 + m.x) % 2
 
+  -- Body plans are built from parts rather than a box and a lid: silhouette
+  -- first (legs, torso, shoulders, head), then the bits that give a species
+  -- away (horns, snouts, tails), then eyes on the +y face where the camera can
+  -- see them. Height is free -- z is not constrained by the tile grid the way
+  -- width is -- so detail goes upward.
   if b.plan == "biped" then
-    boxfill(x - 1, y, 55, x - 1, y, 57, c)
-    boxfill(x + 1, y, 55, x + 1, y, 57, c)
-    boxfill(x - 1, y - 1, 52, x + 1, y + 1, 54, c)
-    boxfill(x - 1, y - 1, 50, x + 1, y + 1, 51, hi)
-    vset(x - 1, y + 1, 50, 8)                       -- eyes, on the near face
-    vset(x + 1, y + 1, 50, 8)
+    boxfill(x - 2, y - 1, 55, x - 1, y + 1, 57, c)          -- legs
+    boxfill(x + 1, y - 1, 55, x + 2, y + 1, 57, c)
+    boxfill(x - 2, y - 2, 51, x + 2, y + 2, 54, c)          -- torso
+    boxfill(x - 3, y - 1, 51, x + 3, y + 1, 52, hi)         -- shoulders
+    boxfill(x - 3, y, 53, x - 3, y, 55, c)                  -- arms
+    boxfill(x + 3, y, 53, x + 3, y, 55, c)
+    boxfill(x - 2, y - 2, 47, x + 2, y + 2, 50, hi)         -- head
+    boxfill(x - 2, y - 1, 45, x - 2, y + 1, 46, c)          -- horns
+    boxfill(x + 2, y - 1, 45, x + 2, y + 1, 46, c)
+    boxfill(x - 2, y + 2, 53, x + 2, y + 2, 53, RAMPS.cold[l + 1])  -- belt
+    vset(x - 1, y + 2, 48, 8)                               -- eyes, near face
+    vset(x + 1, y + 2, 48, 8)
   elseif b.plan == "quad" then
-    boxfill(x - 1, y - 1, 54, x + 1, y + 1, 56, c)
-    boxfill(x - 2, y, 56, x + 2, y, 57, c)
-    boxfill(x, y + 1, 53, x + 1, y + 2, 55, hi)
-    vset(x + 1, y + 2, 53, 8)
+    boxfill(x - 2, y - 2, 52, x + 2, y + 1, 55, c)          -- barrel
+    boxfill(x - 2, y - 2, 56, x - 2, y - 1, 57, c)          -- legs
+    boxfill(x + 2, y - 2, 56, x + 2, y - 1, 57, c)
+    boxfill(x - 2, y + 1, 56, x - 2, y + 1, 57, c)
+    boxfill(x + 2, y + 1, 56, x + 2, y + 1, 57, c)
+    boxfill(x - 1, y + 2, 50, x + 1, y + 3, 53, hi)         -- head, thrust out
+    boxfill(x - 1, y + 3, 52, x + 1, y + 4, 53, c)          -- snout
+    boxfill(x - 1, y + 2, 48, x - 1, y + 2, 49, hi)         -- ears
+    boxfill(x + 1, y + 2, 48, x + 1, y + 2, 49, hi)
+    boxfill(x - 1, y - 3, 51, x + 1, y - 2, 52, c)          -- tail
+    vset(x - 1, y + 4, 51, 8)
+    vset(x + 1, y + 4, 51, 8)
   elseif b.plan == "blob" then
-    sphere(x, y, 55 + bob, 3, c)
-    vset(x - 1, y + 2, 54 + bob, 7)
-    vset(x + 1, y + 2, 54 + bob, 7)
+    sphere(x, y, 54 + bob, 4, c)
+    sphere(x, y - 1, 53 + bob, 2, hi)                       -- a lighter core
+    boxfill(x - 3, y - 1, 57, x + 3, y + 1, 57, c)          -- it spreads
+    vset(x - 2, y + 3, 52 + bob, 7)
+    vset(x + 2, y + 3, 52 + bob, 7)
+    vset(x - 2, y + 3, 53 + bob, 0)
+    vset(x + 2, y + 3, 53 + bob, 0)
   elseif b.plan == "swarm" then
-    for i = 0, 4 do
-      local a = frame * 0.03 + i / 5 + m.x
-      boxfill(flr(x + cos(a) * 3), flr(y - sin(a) * 3), 52 + (i % 3),
-              flr(x + cos(a) * 3), flr(y - sin(a) * 3), 53 + (i % 3), c)
+    for i = 0, 5 do
+      local a2 = frame * 0.03 + i / 6 + m.x
+      local sx = flr(x + cos(a2) * 4)
+      local sy = flr(y - sin(a2) * 3)
+      local sz = 49 + (i % 4) * 2
+      boxfill(sx - 1, sy, sz, sx + 1, sy, sz + 1, c)        -- body
+      vset(sx - 1, sy + 1, sz, hi)                          -- wings
+      vset(sx + 1, sy + 1, sz, hi)
     end
   elseif b.plan == "tall" then
-    boxfill(x - 2, y - 1, 53, x + 2, y + 1, 57, c)
-    boxfill(x - 1, y - 1, 49, x + 1, y + 1, 52, hi)
-    vset(x - 1, y + 1, 50, 8)
-    vset(x + 1, y + 1, 50, 8)
-    boxfill(x - 3, y, 54, x - 3, y, 56, c)
-    boxfill(x + 3, y, 54, x + 3, y, 56, c)
+    boxfill(x - 2, y - 1, 53, x - 1, y + 1, 57, c)          -- legs
+    boxfill(x + 1, y - 1, 53, x + 2, y + 1, 57, c)
+    boxfill(x - 3, y - 2, 47, x + 3, y + 2, 52, c)          -- slab of a torso
+    boxfill(x - 3, y + 2, 48, x + 3, y + 2, 51, hi)         -- chest plate
+    boxfill(x - 4, y - 1, 48, x - 4, y + 1, 54, c)          -- long arms
+    boxfill(x + 4, y - 1, 48, x + 4, y + 1, 54, c)
+    boxfill(x - 2, y - 2, 43, x + 2, y + 2, 46, hi)         -- head
+    boxfill(x - 3, y - 1, 41, x - 3, y + 1, 43, c)          -- horns
+    boxfill(x + 3, y - 1, 41, x + 3, y + 1, 43, c)
+    vset(x - 1, y + 2, 44, 8)
+    vset(x + 1, y + 2, 44, 8)
   else
     ghost_draw(x, y, c, hi, bob)
   end
@@ -1474,13 +1556,13 @@ function hud_draw()
   for i = 1, min(hpmax, 20) do
     local x = 4 + (i - 1) * 3
     local lit = i <= hp
-    line(x, 4, x + 1, 4, lit and (hp > 3 and 8 or 14) or 5)
-    line(x, 5, x + 1, 5, lit and (hp > 3 and 14 or 8) or 1)
+    line(x, 7, x + 1, 7, lit and (hp > 3 and 8 or 14) or 5)
+    line(x, 8, x + 1, 8, lit and (hp > 3 and 14 or 8) or 1)
   end
   for i = 1, min(arm, 10) do
-    local x = 72 + (i - 1) * 4
-    line(x, 4, x + 2, 4, 6)
-    line(x, 5, x + 2, 5, 13)
+    local x = 76 + (i - 1) * 4
+    line(x, 7, x + 2, 7, 6)
+    line(x, 8, x + 2, 8, 13)
   end
 
   print("d" .. depth .. " " .. theme.name .. "  g" .. gold, 4, 12, theme.acc)
@@ -1508,7 +1590,7 @@ end
 -- The explored graph, chambers and corridors alike. `rect` is not implemented
 -- by the host, so boxes are four `line` calls.
 function minimap()
-  local bx, bz = 96, 18
+  local bx, bz = 96, 24
   for i = 1, #nodes do
     local n = nodes[i]
     if n.seen then
@@ -1690,34 +1772,36 @@ end
 
 function death_draw()
   set_draw_slice(HUD_Y)
-  banner("you died", 8, 8)
-  banner("killed by " .. (killer or "the dark"), 16, 7)
-  banner("depth " .. depth .. "  score " .. score, 24, 7)
-  if modet > 90 and frame % 40 < 26 then banner("press x", 32, 10) end
+  -- same four rows the HUD uses; below z = 28 the room hides the left half
+  banner("you died", 7, 8)
+  banner("killed by " .. (killer or "the dark"), 14, 7)
+  banner("depth " .. depth .. "  score " .. score, 21, 7)
+  if modet > 90 and frame % 40 < 26 then banner("press x", 28, 10) end
 end
 
 function title_draw()
-  -- A lit floor, kept down at the room's own height so it stays out of the
-  -- sky band the text lives in. Drawn with the same ramps as a real floor, so
-  -- the title screen is a demonstration of the light model rather than a
-  -- picture of one.
+  -- The demo floor matches the play area's footprint, not a square: at this
+  -- camera a square slab runs off the bottom of the frame and swallows the
+  -- text. Same ramps as a real floor, so the title screen is a demonstration
+  -- of the light model rather than a picture of one.
   local ramp = RAMPS.cold
-  boxfill(6, 6, FLOOR_Z, 121, 121, FLOOR_B, ramp[2])
+  local xmax, ymax = OX + GW * TS, OY + GH * TS
+  boxfill(OX, OY, FLOOR_Z, xmax, ymax, FLOOR_B, ramp[2])
   for i = 3, 1, -1 do
-    local r = 14 + i * 16
-    boxfill(64 - r, 64 - r, FLOOR_Z, 64 + r, 64 + r, FLOOR_Z,
-            RAMPS.warm[5 - i])
+    local rx, ry = 12 + i * 16, 8 + i * 11
+    boxfill(max(OX, 64 - rx), max(OY, 46 - ry), FLOOR_Z,
+            min(xmax, 64 + rx), min(ymax, 46 + ry), FLOOR_Z, RAMPS.warm[5 - i])
   end
   for i = 0, 5 do
     local a = frame * 0.01 + i / 6
-    vset(flr(64 + cos(a) * 40), flr(64 - sin(a) * 40), FLOOR_Z - 1, 9)
+    vset(flr(64 + cos(a) * 44), flr(46 - sin(a) * 30), FLOOR_Z - 1, 9)
   end
   set_draw_slice(HUD_Y)
-  banner("deeper", 4, 10)
+  banner("deeper", 5, 10)
   banner("a voxbox roguelike", 11, 12)
-  banner("arrows move and attack", 24, 7)
-  banner("x confirm   z cast", 31, 7)
-  banner("best depth " .. best_depth .. "  hi " .. hiscore, 38, 6)
-  banner("z  torchlight " .. (lightfx and "on" or "off"), 44, lightfx and 10 or 6)
-  if frame % 40 < 26 then banner("press x to start", 54, 10) end
+  banner("arrows move and attack", 20, 7)
+  banner("x confirm   z cast", 27, 7)
+  banner("best depth " .. best_depth .. "  hi " .. hiscore, 34, 6)
+  banner("z  torchlight " .. (lightfx and "on" or "off"), 41, lightfx and 10 or 6)
+  if frame % 40 < 26 then banner("press x to start", 48, 10) end
 end

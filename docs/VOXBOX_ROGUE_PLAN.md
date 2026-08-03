@@ -92,12 +92,19 @@ and the room. Section 1.2 handles it by design, not by luck.
 |---|---|---|
 | Tile footprint | 6 x 6 voxels | hero reads at ~10 voxels tall; smaller and armour is invisible |
 | Light cell | 1 x 1 voxel | six to a tile — light is finer than the grid it lights (§2.1) |
-| Room grid | up to 21 x 21 tiles | 126 x 126 voxels of a 128 volume |
-| Generated chamber | 15..19 x 14..19 tiles | fills most of the grid; a room that sits small inside the footprint wastes the volume |
+| Room grid | 21 x 15 tiles | **wide, not square** — see below |
+| Generated chamber | 18..21 x 12..15 tiles | fills the grid; a room that sits small inside the footprint wastes the volume |
 | Floor surface | z = 58 | **kept low on purpose** — see below |
 | Wall height | 12 voxels, z = 46..58 | tall enough to hold torches, short enough not to swallow the room |
 | Hero | 10 voxels tall, z = 48..57 | |
 | Ceiling | none | open-topped, as every isometric game does |
+
+**The footprint is wide because the screen is.** A square grid at this camera
+projects to something nearly square, so filling the frame's width overflowed
+its height and left nowhere for a HUD. 21 x 15 projects to roughly the frame's
+own shape: 97% of the width used, with a quarter of the height clear above the
+room. Fewer tiles than a square grid, but every tile is ~1.3x bigger on screen,
+which is what "scale up the play area" actually meant.
 
 The floor height is not a free parameter. Once the floor plan fills the
 footprint there is no empty space *inside* the volume for a HUD, so the only
@@ -137,10 +144,26 @@ settled at:
 "camera": { "pos": [123, 204, -77], "target": [58, 64, 52], "fov": 42 }
 ```
 
-22 degrees of azimuth and 38 of elevation. The elevation shows the floor plan;
+12 degrees of azimuth and 38 of elevation. The elevation shows the floor plan;
 the azimuth is deliberately short of the textbook 45, because the HUD and all
-the dialogue live on a y-slice and a slice seen at 45 degrees skews the 3x5
-font past comfortable reading.
+the dialogue live on a y-slice and a tilted slice skews the 3x5 font.
+
+Azimuth is a direct trade against HUD space, and it was measured rather than
+guessed. At the same 97% width:
+
+| azimuth | clear strip | usable HUD rows | row skew |
+|---|---|---|---|
+| 22° | 17% | 1 | 0.27 |
+| 16° | 20% | 2 | 0.21 |
+| **12°** | **25%** | **4** | **0.16** |
+| 8° | 29% | 5 | 0.11 |
+| 0° | 38% | 7 | 0.00 |
+
+12° keeps two wall faces visible — the thing that makes it read as isometric —
+while quadrupling the HUD rows. Framing itself is solved numerically: project
+the eight corners of a full-grid node, translate the camera along its own
+right/up axes until the box is centred horizontally and its bottom edge sits at
+-0.97, then shrink fov until it just fits.
 
 ---
 
@@ -183,6 +206,14 @@ a 6-voxel tile looks like a rendering fault rather than a torch.
   and the room read as flat. A few pools with darkness between them is what
   makes torchlight look like torchlight, and it is also what gives the hero's
   own torch something to do.
+
+### 2.1c Masonry
+
+Walls are three bands rather than one slab: a capping course on top, the body,
+and a skirting at the floor in the theme's accent. One extra `boxfill` per wall
+run each, and the renderer's per-face shading does the rest. Floors get seams
+on every third gridline — every tile edge would be correct and would also
+multiply the floor's run count, and every third reads as large slabs anyway.
 
 ### 2.1b Stone texture
 
@@ -391,6 +422,12 @@ changes on a turn, which is most of the performance budget won back.
 Six drawing functions, parameterised by palette and size, cover the whole
 menagerie: `biped`, `blob`, `floater`, `quadruped`, `swarm`, `tall`. A monster
 is data: plan, ramp, stats, behaviour, bark list.
+
+Each is built from parts rather than a box and a lid — silhouette first (legs,
+torso, shoulders, head), then the details that give a species away (horns,
+snouts, tails, wings), then eyes on the +y face where the camera can see them.
+**Height is free**: z is not constrained by the tile grid the way width is, so
+detail goes upward. A tile is 6 voxels across, but a creature can be 14 tall.
 
 ### 5.2 Ghosts, honestly
 
