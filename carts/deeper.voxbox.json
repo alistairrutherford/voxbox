@@ -6,9 +6,10 @@
   "controls": [
     ["arrows", "move, or attack by bumping"],
     ["x", "confirm / start"],
-    ["z", "cast the held scroll"],
+    ["z", "cast the held scroll (on the title screen: torchlight on/off)"],
     "your torch burns down: find oil before it does",
-    "health comes back slowly if you break off and walk away",
+    "armour is the second bar: it subtracts from every hit you take",
+    "health comes back slowly in a fight, quickly once nothing is hunting you",
     "bread and draughts heal; reaching a new floor heals more",
     "stairs are the yellow whirlpool",
     "corridors are places too, and things live in them"
@@ -23,6 +24,8 @@
 
   "_groundZ": "Pinned to the floor slab. Auto-derivation would work in a plain room, but a node full of pillars and sill walls shifts the mode of the topmost voxels and the drop shadows jump between rooms. Pinning keeps hero and monster shadows on the floor where they belong.",
   "groundZ": 58,
+
+  "_lighting": "Torchlight can be switched off from the title screen with z, and the choice is remembered in cartdata slot 2. Flat mode forces every light cell to one level, so the room is evenly lit and the pools disappear -- and the light map collapses from ~590 run-length boxes to 3, which makes it a performance option as well as a legibility one. The Pot Helm's -2 vision joke is inert while it is off.",
 
   "_persistGlobals": "hiscore and best_depth go through cartdata/dget/dset. A mid-run resume would only need run_seed and depth, since the dungeon regenerates from its seed, but permadeath is the point."
 }

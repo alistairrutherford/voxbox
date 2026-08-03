@@ -114,13 +114,17 @@ jump as you walk between rooms.
 ### 1.2 Cutaway walls
 
 Only the two **far** walls (low y, low x) are drawn full height. The two near
-walls are drawn as a 2-voxel sill — enough to read as an edge, too low to
+walls are drawn as a 4-voxel sill — enough to read as an edge, too low to
 occlude anything. This is the standard isometric cutaway, and here it is not a
 stylistic choice but a requirement of the camera.
 
-It has a happy consequence: **torches go on the far walls**, which are exactly
-the walls facing the camera. A torch on a near wall would have had its flame
-hidden by its own bracket.
+Torches go on **all four** walls, not just the far pair. The first version put
+them only on the far walls, reasoning that a near-wall torch would have its
+flame hidden by its own bracket — but the near walls are only a sill, so a
+flame mounted above sill height clears it and is perfectly visible. The
+occlusion rule that keeps *detail* off near faces does not apply to something
+standing proud of a low wall. Once rooms grew to fill the footprint, far-wall
+lighting alone left the near half of every room black.
 
 ### 1.3 Camera
 
@@ -144,6 +148,14 @@ font past comfortable reading.
 
 This is the heart of the look, and the part that has to be invented rather
 than switched on.
+
+### 2.0 Switching it off
+
+Torchlight toggles from the title screen with `z`, remembered in `cartdata`
+slot 2. Flat mode forces every cell to one level: the room is evenly lit, the
+pools disappear, and the light map collapses from ~590 run-length boxes to 3 —
+so it is a performance option as much as a legibility one. The Pot Helm's −2
+vision joke is inert while it is off, which is the honest cost.
 
 ### 2.1 The light map
 
@@ -301,9 +313,20 @@ how much you have to earn them:
 
 | Source | Amount | What it is for |
 |---|---|---|
-| Natural regen | +1 every 16 turns | slow enough that you cannot out-heal a fight — it only pays for *breaking off*, which is the decision it exists to create |
+| Natural regen, hunted | +1 every 14 turns | too slow to out-heal a fight, so it only pays for *breaking off* |
+| Natural regen, calm | +1 every 3 turns | once nothing in the node is awake. One rate cannot do both jobs: slow enough to matter in a fight makes walking somewhere quiet pure tedium, so leaving the fight switches rate |
 | Bread, healing draught | +6, +14 | the common drop; food is deliberately frequent in the loot table |
 | Reaching a new floor | +8, and +2 max | makes the stairs worth pushing for rather than something you fall down at 2 hp |
+
+**Armour is the other half of survival** and gets its own row of HUD pips beside
+health, because a number buried in a text line does not read as something worth
+going to look for. It subtracts from every hit, with a floor of 1 damage.
+
+That floor is why the hero starts with **zero** armour: a single point reduces
+every depth-1 monster to the minimum and makes the first floor harmless. The
+fix for dying on floor 1 was making armour *findable* there — every piece used
+to be gated behind `d >= 2`, so the one floor where you had none was also the
+only floor where none could drop.
 
 Max health rising with depth is also what keeps the numbers honest as monster
 damage scales, and the HUD pips show empty slots as well as full ones so both
@@ -636,6 +659,7 @@ three bundled carts do.
 | **4 light levels may band visibly** | Largely answered by the finer grid and Euclidean falloff (§2.1). Dithering the boundary is the next fix; §12 is the one after. |
 | **26-character dialogue** | A constraint on the writing, not a technical risk. One-liners are funnier anyway. |
 | **Scope** | This is much larger than the three existing carts (480–880 lines). Expect 2,000+ lines. The phase boundaries are all playable, so it can stop early and still be a game. |
+| **Difficulty drifting as content changes** | Real, and it bit once: growing rooms from 12x10 to 18x17 silently took `flr(area/55)` from 2 monsters to 5, all inside the aggro radius of one room. Density is now per *depth*, not per area. A scripted survival probe (40 naive runs that never retreat) is the regression test — it should sit near 2/40 deaths on floor 1. |
 
 **Resolved: corridors are rooms in their own right.** A corridor is a node in
 the dungeon graph exactly like a chamber — its own tile grid, its own torches,

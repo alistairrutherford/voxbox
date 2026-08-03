@@ -54,11 +54,19 @@ MAX_PART = 80            -- particle cap: each one is a vset
 
 -- Recovery. Rogue regenerated health with time and so does this: without it
 -- the run is a one-way ratchet down to zero and no amount of good play buys
--- anything back. Slow enough that you cannot out-heal a fight -- you have to
--- break off, which is the decision the mechanic exists to create.
-REGEN    = 16            -- turns per point of natural healing
+-- anything back. Two rates, because one rate cannot do both jobs: in a fight
+-- it must be too slow to out-heal the damage, but walking somewhere quiet to
+-- tick back up at that rate is just tedium. Leaving the fight switches rate.
+REGEN     = 14           -- turns per point while anything is hunting you
+REGEN_CALM = 3           -- turns per point once nothing in the node is awake
 DIVE_HEAL = 8            -- restored on reaching a new floor
 DIVE_MAX  = 2            -- and permanent max health for getting there
+AGGRO     = 6            -- tiles at which a monster notices you
+
+-- Flat-light mode: every cell forced to one level, so the room is evenly lit
+-- and the torch pools vanish. Toggled on the title screen and remembered in
+-- cartdata. Also much cheaper, since the light map collapses to one run a row.
+FLAT_FLOOR, FLAT_WALL = 2, 3
 
 -- Materials are not colours, they are four-step ramps indexed by light level.
 RAMPS = {
@@ -335,7 +343,10 @@ function node_populate(n, d, idx)
   n.mons, n.items = {}, {}
   if idx == 1 then return end                    -- the entrance is a breather
   local area = n.w * n.h
-  local count = clamp(flr(area / 55) + irnd(2) + flr(d / 3), 0, 8)
+  -- Density is per *depth*, not per area. When rooms grew from 12x10 to 18x17
+  -- the old area/55 quietly went from 2 monsters to 5, all of them inside the
+  -- aggro radius of the same room -- which is what made floor 1 lethal.
+  local count = clamp(flr(area / 130) + flr(d / 2) + irnd(2), 1, 8)
   if n.kind == "corr" then count = min(count, 2) end
   for i = 1, count do
     local x, y = spot(n)
@@ -387,6 +398,15 @@ end
 
 function light_build()
   local n = node
+  if not lightfx then
+    -- flat mode: one level everywhere, no pools, no flicker
+    for y = 0, LH - 1 do
+      local lr, wr = lmap[y], wmap[y]
+      for x = 0, LW - 1 do lr[x] = FLAT_FLOOR wr[x] = false end
+    end
+    light_runs()
+    return
+  end
   for y = 0, LH - 1 do
     local lr, wr = lmap[y], wmap[y]
     for x = 0, LW - 1 do lr[x] = 0 wr[x] = false end
@@ -549,6 +569,7 @@ function wall_runs()
 end
 
 function wall_col(tx, ty)
+  if not lightfx then return RAMPS[theme.cold][FLAT_WALL + 1] end
   local lx, ly = tx * SUB + 1, ty * SUB + 1
   local l = lmap[ly][lx]
   local r = wmap[ly][lx] and RAMPS[theme.warm] or RAMPS[theme.cold]
@@ -611,7 +632,11 @@ end
 -- from one.
 function hero_init()
   hero = { tx = 0, ty = 0, px = 0, py = 0, face = 3, anim = 0 }
-  hp, hpmax, regen = 14, 14, 0
+  hp, hpmax, regen = 16, 16, 0
+  -- Starting armour is 0 on purpose. Damage has a floor of 1 (mon_attack), so
+  -- a single point of armour reduces *every* depth-1 monster to that floor and
+  -- makes the first floor harmless. The fix for dying on floor 1 was making
+  -- armour findable there, not handing it over.
   gold, arm, dmg = 0, 0, 2
   helm, chest, shield, helm_pot = false, false, false, false
   torchfuel = 250
@@ -701,45 +726,45 @@ end
 -- cover the whole menagerie.
 BESTIARY = {
   { n = "sewer rat",  plan = "quad",  ramp = "cold",  hp = 3,  dmg = 1, d = 1,
-    say = { "SQUEAK. THAT IS ALL I HAVE." } },
+    say = { "SQUEAK. THAT IS ALL" } },
   { n = "goblin intern", plan = "biped", ramp = "moss", hp = 5, dmg = 2, d = 1,
-    flee = true, say = { "I AM ONLY HERE FOR THE XP", "IS THIS UNPAID? IT IS." } },
+    flee = true, say = { "ONLY HERE FOR THE XP", "IS THIS UNPAID? IT IS." } },
   { n = "sorry slime", plan = "blob", ramp = "moss", hp = 6, dmg = 2, d = 1,
-    split = true, say = { "SORRY IN ADVANCE", "NO HARD FEELINGS. SOME." } },
+    split = true, say = { "SORRY IN ADVANCE", "NO HARD FEELINGS" } },
   { n = "skeleton",   plan = "biped", ramp = "bone", hp = 8,  dmg = 3, d = 2,
     say = { "I AM ALL BONE, NO PLAN" } },
   { n = "bat cloud",  plan = "swarm", ramp = "cold", hp = 5,  dmg = 2, d = 2,
     erratic = true, say = { "WE HAVE DISCUSSED THIS" } },
   { n = "minor poet", plan = "ghost", ramp = "ice",  hp = 6,  dmg = 1, d = 2,
-    calm = true, say = { "I DIED DOING WHAT I LOVED",
+    calm = true, say = { "I DIED DOING WHAT I",
                          "WHICH WAS, SADLY, THIS" } },
   { n = "mimic",      plan = "blob",  ramp = "warm", hp = 10, dmg = 4, d = 3,
-    say = { "OPEN ME. I AM A CHEST.", "A NORMAL CHEST. NO TEETH." } },
+    say = { "OPEN ME. I AM A CHEST.", "A NORMAL CHEST" } },
   { n = "cultist",    plan = "biped", ramp = "blood", hp = 9, dmg = 3, d = 3,
-    say = { "THE STARS ARE NEARLY RIGHT", "GIVE IT ANOTHER FORTNIGHT" } },
+    say = { "THE STARS ARE ALMOST", "GIVE IT A FORTNIGHT" } },
   { n = "hound",      plan = "quad",  ramp = "blood", hp = 9, dmg = 4, d = 3,
-    charge = true, say = { "WHO IS A GOOD BOY. NOT YOU." } },
+    charge = true, say = { "WHO IS A GOOD BOY" } },
   { n = "wraith",     plan = "ghost", ramp = "ice",  hp = 12, dmg = 4, d = 4,
-    drain = true, say = { "YOUR ARMOUR LOOKS HEAVY", "LET ME TAKE THAT" } },
+    drain = true, say = { "THAT ARMOUR IS HEAVY", "LET ME TAKE THAT" } },
   { n = "live armour", plan = "biped", ramp = "cold", hp = 14, dmg = 5, d = 4,
     drops = true, say = { "NOBODY IS IN HERE", "STOP ASKING" } },
   { n = "sad ghost",  plan = "ghost", ramp = "cold", hp = 10, dmg = 2, d = 4,
-    sigh = true, say = { "I EXPECTED MORE FROM YOU", "SO DID YOUR MOTHER" } },
+    sigh = true, say = { "I EXPECTED MORE", "SO DID YOUR MOTHER" } },
   { n = "cave troll", plan = "tall",  ramp = "moss", hp = 20, dmg = 6, d = 5,
-    smash = true, say = { "TROLL REDECORATING. MIND OUT." } },
+    smash = true, say = { "TROLL REDECORATING" } },
   { n = "spider",     plan = "quad",  ramp = "bone", hp = 12, dmg = 4, d = 5,
-    web = true, say = { "EIGHT LEGS, ZERO REGRETS" } },
+    web = true, say = { "EIGHT LEGS, NO REGRETS" } },
   { n = "lich clerk", plan = "biped", ramp = "ice",  hp = 18, dmg = 5, d = 6,
-    say = { "YOUR EXPENSES ARE DENIED", "RECEIPTS OR IT DID NOT HAPPEN" } },
+    say = { "EXPENSES ARE DENIED", "NO RECEIPT, NO REFUND" } },
   { n = "ghost landlord", plan = "ghost", ramp = "warm", hp = 14, dmg = 3, d = 6,
-    rent = true, say = { "THAT WILL BE 40 GOLD", "THE DUNGEON IS NOT FREE" } },
+    rent = true, say = { "THAT WILL BE 40 GOLD", "THE DUNGEON ISNT FREE" } },
   { n = "floating eye", plan = "ghost", ramp = "blood", hp = 16, dmg = 5, d = 7,
-    say = { "I HAVE SEEN YOUR INVENTORY" } },
+    say = { "I HAVE SEEN YOUR BAG" } },
   { n = "regret",     plan = "ghost", ramp = "cold", hp = 14, dmg = 4, d = 8,
-    follows = true, say = { "REMEMBER THE THING YOU SAID" } },
+    follows = true, say = { "REMEMBER WHAT YOU SAID" } },
   { n = "the manager", plan = "tall", ramp = "blood", hp = 40, dmg = 7, d = 9,
-    boss = true, say = { "I WILL HAVE TO ESCALATE THIS",
-                         "THIS IS A PERFORMANCE ISSUE" } },
+    boss = true, say = { "I MUST ESCALATE THIS",
+                         "A PERFORMANCE ISSUE" } },
 }
 
 function mon_roll(d)
@@ -754,7 +779,7 @@ end
 
 function mon_new(bi, x, y)
   local b = BESTIARY[bi]
-  local scale = 1 + depth * 0.12
+  local scale = 1 + (depth - 1) * 0.14
   return {
     bi = bi, x = x, y = y, px = x, py = y, anim = 0,
     hp = flr(b.hp * scale), dmg = flr(b.dmg * scale), said = false, slow = 0,
@@ -846,9 +871,12 @@ ITEMS = {
 -- between fights.
 function item_roll(d)
   local pool = { 1, 1, 1, 2, 2, 2, 2, 14, 14, 3, 3, 8, 9, 10, 11, 12, 13 }
-  if d >= 2 then add(pool, 4) add(pool, 5) end
-  if d >= 3 then add(pool, 6) end
-  if d >= 4 then add(pool, 7) end
+  -- Every armour piece used to be gated behind d >= 2, which meant the one
+  -- floor where you have no armour at all was also the only floor where none
+  -- could drop. Helms now appear from the start.
+  add(pool, 4) add(pool, 5)
+  if d >= 2 then add(pool, 6) end
+  if d >= 3 then add(pool, 7) end
   return pick(pool)
 end
 
@@ -885,7 +913,7 @@ function item_take(it)
     sfx_safe("coin_pickup")
   elseif d.k == "heal" then
     hp = min(hpmax, hp + d.v)
-    say("you", "THE BREAD IS FINE. JUST FINE.")
+    say("you", "THE BREAD IS FINE")
     sfx_safe("potion_powerup")
   elseif d.k == "oil" then
     torchfuel = min(400, torchfuel + d.v)
@@ -895,7 +923,7 @@ function item_take(it)
     helm = true
     helm_pot = d.pot and true or false
     arm = arm + (d.pot and 1 or 2)
-    say("you", d.pot and "IT FITS. YOU CANNOT SEE." or "A PROPER HELM")
+    say("you", d.pot and "IT FITS. YOU CANT SEE" or "A PROPER HELM")
     sfx_safe("armour_equip")
   elseif d.k == "chest" then
     chest = true
@@ -938,16 +966,16 @@ function cast(s)
     spell_light = 60
     sfx_safe("light_powerup")
     burst(hx, hy, 24, { 10, 7, 9 })
-    say("you", "LET THERE BE SOME LIGHT")
+    say("you", "LET THERE BE LIGHT")
   elseif s == "annoy" then
     sfx_safe("scroll_warp")
     for m in all(node.mons) do m.slow = 4 end
-    say("you", "THEY ALL DROPPED THEIR KIT")
+    say("you", "THEY DROPPED THEIR KIT")
   elseif s == "confidence" then
     spell_conf = 40
     sfx_safe("potion_powerup")
     burst(hx, hy, 20, { 14, 8, 10 })
-    say("you", "YOU FEEL EXTREMELY READY")
+    say("you", "YOU FEEL VERY READY")
   elseif s == "percussion" then
     sfx_safe("percussion_smash")
     shake = 8
@@ -961,7 +989,7 @@ function cast(s)
     end
     if rnd(1) < 0.1 then
       dmg = max(1, dmg - 1)
-      say("you", "YOU BROKE YOUR OWN SWORD")
+      say("you", "YOU BROKE YOUR SWORD")
     else
       say("you", "PERCUSSIVE MAINTENANCE")
     end
@@ -1026,7 +1054,7 @@ function try_move(dir)
       if spell_conf > 0 and rnd(1) < 0.35 then
         say("you", "A CONFIDENT MISS")
       elseif spell_chicken > 0 then
-        say("you", "CHICKENS CANNOT HOLD SWORDS")
+        say("you", "CHICKENS HAVE NO HANDS")
       else
         mon_hurt(i, roll)
       end
@@ -1070,7 +1098,7 @@ function end_turn()
   turns = turns + 1
   torchfuel = max(0, torchfuel - 1)
   regen = regen + 1
-  if regen >= REGEN then
+  if regen >= (hunted() and REGEN or REGEN_CALM) then
     regen = 0
     if hp < hpmax then hp = hp + 1 end
   end
@@ -1079,10 +1107,21 @@ function end_turn()
   if spell_chicken > 0 then spell_chicken = spell_chicken - 1 end
   if spell_swap > 0 then spell_swap = spell_swap - 1 end
   if torchfuel == 0 and turns % 40 == 0 then
-    say("you", "THE DARK IS GETTING PERSONAL")
+    say("you", "THE DARK IS PERSONAL")
   end
   mons_turn()
   light_build()
+end
+
+-- Is anything in this node actually after us? Drives the regen rate, so that
+-- retreating pays off quickly instead of being a long walk.
+function hunted()
+  for m in all(node.mons) do
+    if m.angry or chebyshev(m.x, m.y, hero.tx, hero.ty) <= AGGRO then
+      return true
+    end
+  end
+  return false
 end
 
 function mons_turn()
@@ -1096,7 +1135,7 @@ function mons_turn()
       local d = chebyshev(m.x, m.y, hero.tx, hero.ty)
       if d <= 1 then
         mon_attack(m, b)
-      elseif d <= 8 or b.follows then
+      elseif d <= AGGRO or b.follows then
         if b.calm and not m.angry then
           if not m.said then bark(m, b) end
         else
@@ -1139,7 +1178,7 @@ function mon_attack(m, b)
   local hit = max(1, m.dmg - arm)
   if b.sigh then
     dmg = max(1, dmg - 1)
-    say(b.n, "I EXPECTED MORE FROM YOU")
+    say(b.n, "I EXPECTED MORE")
     return
   end
   if b.rent and gold > 0 then
@@ -1150,7 +1189,7 @@ function mon_attack(m, b)
   end
   if b.drain and arm > 0 then
     arm = max(0, arm - 1)
-    say(b.n, "LET ME TAKE THAT FOR YOU")
+    say(b.n, "LET ME TAKE THAT")
   end
   hp = hp - hit
   sfx_safe("player_hurt")
@@ -1193,7 +1232,7 @@ function mon_hurt(i, amount)
     end
     deli(n.mons, i)
   elseif b.flee and m.hp <= 2 then
-    say(b.n, "I AM ESCALATING THIS UPWARD")
+    say(b.n, "I AM ESCALATING THIS")
     m.slow = 3
   end
 end
@@ -1260,33 +1299,35 @@ function hud_draw()
   -- built out of pipes comes out as an invisible row of spaces.
   -- Pips show max health as well as current: the empty ones are what tells
   -- you a draught is worth drinking and that diving raised the ceiling.
+  -- Armour gets its own row of pips beside them, because it is the other half
+  -- of how long you live and a number buried in a text line does not read as
+  -- something you should go looking for.
   for i = 1, min(hpmax, 20) do
     local x = 4 + (i - 1) * 3
     local lit = i <= hp
     line(x, 4, x + 1, 4, lit and (hp > 3 and 8 or 14) or 5)
     line(x, 5, x + 1, 5, lit and (hp > 3 and 14 or 8) or 1)
   end
-  -- The usable band was measured, not derived: a grid of labelled test rows
-  -- drawn on this plane and read off a screenshot. Dropping the room to
-  -- FLOOR_Z = 58 opened it right up -- z = 2..38 is clear even with a node
-  -- filling the whole footprint, where the old high floor left only z = 11..32.
-  -- Rows drift right as z grows, because the plane is seen at 22 degrees; that
-  -- is why the right-hand column sits at x = 60 and not further left.
-  if #spells > 0 then
-    print("z-" .. SPELLINFO[spells[1]].n, 60, 4, SPELLINFO[spells[1]].c)
+  for i = 1, min(arm, 10) do
+    local x = 72 + (i - 1) * 4
+    line(x, 4, x + 2, 4, 6)
+    line(x, 5, x + 2, 5, 13)
   end
 
-  print("d" .. depth .. " " .. theme.name .. "  g" .. gold .. " a" .. arm,
-        4, 12, theme.acc)
+  print("d" .. depth .. " " .. theme.name .. "  g" .. gold, 4, 12, theme.acc)
 
   -- torch fuel, the clock that makes the light map a mechanic
   local fw = flr(torchfuel / 400 * 30)
   line(92, 12, 122, 12, 5)
   if fw > 0 then line(92, 12, 92 + fw, 12, torchfuel > 80 and 9 or 8) end
 
+  if #spells > 0 then
+    print("z-" .. SPELLINFO[spells[1]].n, 4, 20, SPELLINFO[spells[1]].c)
+  end
+
   if bark_t > 0 then
-    print(bark_who, 4, 21, 6)
-    print(bark_txt, 4, 28, 7)
+    print(sub(bark_who, 1, 22), 4, 28, 6)
+    print(sub(bark_txt, 1, 22), 4, 35, 7)
   end
 
   minimap()
@@ -1295,18 +1336,18 @@ end
 -- The explored graph, chambers and corridors alike. `rect` is not implemented
 -- by the host, so boxes are four `line` calls.
 function minimap()
-  local bx, bz = 92, 24
+  local bx, bz = 96, 18
   for i = 1, #nodes do
     local n = nodes[i]
     if n.seen then
-      local x = bx + flr(n.gx * 9)
-      local z = bz + flr(n.gy * 9)
-      local w = n.kind == "corr" and 3 or 6
+      local x = bx + flr(n.gx * 8)
+      local z = bz + flr(n.gy * 8)
+      local w = n.kind == "corr" and 2 or 5
       local c = (i == node_idx) and 10 or (i == stair_node and 11 or 5)
       line(x, z, x + w, z, c)
-      line(x, z + 5, x + w, z + 5, c)
-      line(x, z, x, z + 5, c)
-      line(x + w, z, x + w, z + 5, c)
+      line(x, z + 4, x + w, z + 4, c)
+      line(x, z, x, z + 4, c)
+      line(x + w, z, x + w, z + 4, c)
     end
   end
 end
@@ -1340,6 +1381,7 @@ function _init()
   cartdata("voxbox_deeper")
   hiscore = dget(0)
   best_depth = max(1, dget(1))
+  lightfx = dget(2) < 1        -- slot defaults to 0, so effects start on
   frame = 0
   flicker = 0
   modet = 0
@@ -1369,6 +1411,11 @@ function _update()
   anim_lerp()
 
   if mode == "title" then
+    if btnp(5) then
+      lightfx = not lightfx
+      dset(2, lightfx and 0 or 1)
+      sfx_safe("menu_select")
+    end
     if btnp(4) then
       mode = "play"
       modet = 0
@@ -1483,5 +1530,6 @@ function title_draw()
   banner("arrows move and attack", 24, 7)
   banner("x confirm   z cast", 31, 7)
   banner("best depth " .. best_depth .. "  hi " .. hiscore, 38, 6)
-  if frame % 40 < 26 then banner("press x to start", 45, 10) end
+  banner("z  torchlight " .. (lightfx and "on" or "off"), 44, lightfx and 10 or 6)
+  if frame % 40 < 26 then banner("press x to start", 54, 10) end
 end

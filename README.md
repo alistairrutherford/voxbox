@@ -153,9 +153,15 @@ is +1 armour and −2 vision, which it implements by literally subtracting 2 fro
 every light level.
 
 Health comes back the way Rogue's did — slowly, with time — so retreating is a
-real option rather than a stay of execution. Bread and draughts heal properly,
-and reaching a new floor restores health and raises the ceiling, which is what
-makes the stairs worth pushing for.
+real option rather than a stay of execution. It regenerates at two rates: too
+slowly to out-heal a fight, and quickly once nothing in the room is still
+hunting you, because one rate cannot do both jobs without turning the retreat
+into a long walk. Bread and draughts heal properly, and reaching a new floor
+restores health and raises the ceiling.
+
+Armour is the second bar, and it subtracts from every hit. Torchlight can be
+switched off entirely from the title screen if you would rather see the whole
+room — which also collapses the light map from ~590 boxes to 3.
 
 **Corridors are nodes in their own right** — their own tile grid, torches,
 light map and monsters, drawn by exactly the same code. The only thing that
