@@ -11,6 +11,8 @@
     "armour is the second bar: it subtracts from every hit you take",
     "health comes back slowly in a fight, quickly once nothing is hunting you",
     "bread and draughts heal; reaching a new floor heals more",
+    "bump a statue to read it; shrines work once each",
+    "scrolls ask before you take them: x yes, z no",
     "stairs are the yellow whirlpool",
     "corridors are places too, and things live in them"
   ],

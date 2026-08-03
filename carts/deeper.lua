@@ -63,6 +63,27 @@ DIVE_HEAL = 8            -- restored on reaching a new floor
 DIVE_MAX  = 2            -- and permanent max health for getting there
 AGGRO     = 6            -- tiles at which a monster notices you
 
+-- Some pillars are not pillars. A monument occupies a wall tile like any
+-- other pillar -- it blocks, it casts, it is drawn where the pillar was -- but
+-- bumping it says something, and a shrine does something once.
+STATUES = {
+  { n = "a forgotten king",  say = "HE LOOKS DISAPPOINTED" },
+  { n = "a very large rat",  say = "COMMISSIONED BY THE RAT" },
+  { n = "bust of the architect", say = "HE PLANNED THE CORRIDORS" },
+  { n = "an earlier hero",   say = "NOT YOU. AN EARLIER ONE." },
+  { n = "a weeping angel",   say = "DO NOT BLINK. ONLY JOKING" },
+  { n = "a slime, in marble", say = "SURPRISINGLY LIFELIKE" },
+  { n = "the dungeon manager", say = "PLAQUE: EMPLOYEE OF 1347" },
+  { n = "two goblins arguing", say = "TITLED: THE STAND UP" },
+}
+SHRINES = {
+  { n = "shrine of small mercies", k = "heal",  say = "YOU FEEL A BIT BETTER" },
+  { n = "font of stale water",     k = "torch", say = "YOUR TORCH DRINKS DEEP" },
+  { n = "altar of tidy kit",       k = "arm",   say = "YOUR KIT LOOKS TIDIER" },
+  { n = "the lost sock reliquary", k = "gold",  say = "A COIN. ODDLY WARM." },
+  { n = "shrine of second wind",   k = "heal",  say = "THAT IS BETTER" },
+}
+
 ARM_KINDS = { "helm", "chest", "shield" }
 ARM_MSG = { helm = "A PROPER HELM", chest = "BREASTPLATE ON", shield = "SHIELD UP" }
 
@@ -287,11 +308,23 @@ function node_build(n, d)
 
   -- pillars and puddles, chambers only: a corridor three tiles wide has no
   -- room for either and would just become impassable
+  n.props = {}
   if n.kind == "room" and n.w >= 11 and n.h >= 9 then
     if rnd(1) < 0.45 then
       for py = 2, n.h - 3, 3 do
         for px = 2, n.w - 3, 3 do
-          if rnd(1) < 0.5 then n.tile[py][px] = T_WALL end
+          if rnd(1) < 0.5 then
+            n.tile[py][px] = T_WALL
+            -- roughly one pillar in four is worth reading
+            local r = rnd(1)
+            if r < 0.16 then
+              add(n.props, { x = px, y = py, kind = "shrine",
+                             si = irnd(#SHRINES) + 1, used = false })
+            elseif r < 0.36 then
+              add(n.props, { x = px, y = py, kind = "statue",
+                             si = irnd(#STATUES) + 1 })
+            end
+          end
         end
       end
     end
@@ -310,25 +343,31 @@ function node_build(n, d)
   -- Torches go on all four walls, not just the two far ones. The near walls
   -- are drawn as a 4-voxel sill, so a flame mounted above sill height clears
   -- it and is visible -- the occlusion problem that keeps *detail* off near
-  -- faces does not apply to something standing proud of a low wall. With
-  -- rooms this size, far-wall-only lighting leaves the near half black.
+  -- faces does not apply to something standing proud of a low wall.
+  --
+  -- Count is 1..4, picked from the eligible wall tiles at random, not one
+  -- every N tiles along every wall. Spacing them evenly lit the whole
+  -- perimeter and the room read as flat: a few pools with dark between them
+  -- is what makes torchlight look like torchlight.
   n.torch = {}
-  local step = n.kind == "corr" and 5 or 4
-  for x = 1, n.w - 2, step do
-    if n.tile[0][x] == T_WALL and rnd(1) < 0.8 then
-      add(n.torch, { x = x, y = 0, ph = rnd(1) })
-    end
-    if n.h > 3 and n.tile[n.h - 1][x] == T_WALL and rnd(1) < 0.5 then
-      add(n.torch, { x = x, y = n.h - 1, ph = rnd(1) })
+  local cand = {}
+  for x = 1, n.w - 2 do
+    if n.tile[0][x] == T_WALL then add(cand, { x = x, y = 0 }) end
+    if n.h > 3 and n.tile[n.h - 1][x] == T_WALL then
+      add(cand, { x = x, y = n.h - 1 })
     end
   end
-  for y = 1, n.h - 2, step do
-    if n.tile[y][0] == T_WALL and rnd(1) < 0.8 then
-      add(n.torch, { x = 0, y = y, ph = rnd(1) })
+  for y = 1, n.h - 2 do
+    if n.tile[y][0] == T_WALL then add(cand, { x = 0, y = y }) end
+    if n.w > 3 and n.tile[y][n.w - 1] == T_WALL then
+      add(cand, { x = n.w - 1, y = y })
     end
-    if n.w > 3 and n.tile[y][n.w - 1] == T_WALL and rnd(1) < 0.5 then
-      add(n.torch, { x = n.w - 1, y = y, ph = rnd(1) })
-    end
+  end
+  local want = min(n.kind == "corr" and (1 + irnd(2)) or (1 + irnd(4)), #cand)
+  for i = 1, want do
+    local j = irnd(#cand) + 1
+    add(n.torch, { x = cand[j].x, y = cand[j].y, ph = rnd(1) })
+    deli(cand, j)
   end
   if #n.torch == 0 then
     n.tile[0][flr(n.w / 2)] = T_WALL
@@ -397,6 +436,21 @@ function light_alloc()
   txof, tyof = {}, {}
   for lx = 0, LW - 1 do txof[lx] = flr(lx / SUB) end
   for ly = 0, LH - 1 do tyof[ly] = flr(ly / SUB) end
+
+  -- Stone texture, as a per-flagstone nudge to the *light level* rather than a
+  -- paint colour. Perturbing the light means the mottling reads correctly in
+  -- every ramp and at every brightness for free -- a fixed speckle colour
+  -- would fight the torchlight and look wrong in half the themes. Derived from
+  -- an arithmetic hash, not rnd(), so it does not disturb the PRNG stream that
+  -- the dungeon seed depends on.
+  mottle = grid(node.w, node.h, 0)
+  for ty = 0, node.h - 1 do
+    local mrow = mottle[ty]
+    for tx = 0, node.w - 1 do
+      local h = (tx * 73 + ty * 151 + node_idx * 37) % 19
+      mrow[tx] = (h < 4) and -1 or ((h > 14) and 1 or 0)
+    end
+  end
 end
 
 function light_build()
@@ -498,16 +552,19 @@ function light_runs()
   local tile = node.tile
   local rw, rc, ice, acc = RAMPS[theme.warm], RAMPS[theme.cold], RAMPS.ice, theme.acc
   for ly = 0, LH - 1 do
-    local trow = tile[tyof[ly]]
+    local ty = tyof[ly]
+    local trow, mrow = tile[ty], mottle[ty]
     local lrow, wrow = lmap[ly], wmap[ly]
     local cur = {}
     local lx = 0
     while lx < LW do
-      local t = trow[txof[lx]]
+      local tx = txof[lx]
+      local t = trow[tx]
       if t == T_VOID or t == T_WALL then
         lx = lx + 1
       else
-        local l = lrow[lx]
+        local l = lrow[lx] + mrow[tx]
+        if l < 0 then l = 0 elseif l > 3 then l = 3 end
         local c
         if t == T_FLOOR then c = (wrow[lx] and rw or rc)[l + 1]
         elseif t == T_WATER then c = ice[l + 1]
@@ -517,9 +574,11 @@ function light_runs()
         local x0 = lx
         lx = lx + 1
         while lx < LW do
-          local t2 = trow[txof[lx]]
+          local tx2 = txof[lx]
+          local t2 = trow[tx2]
           if t2 == T_VOID or t2 == T_WALL then break end
-          local l2 = lrow[lx]
+          local l2 = lrow[lx] + mrow[tx2]
+          if l2 < 0 then l2 = 0 elseif l2 > 3 then l2 = 3 end
           local c2
           if t2 == T_FLOOR then c2 = (wrow[lx] and rw or rc)[l2 + 1]
           elseif t2 == T_WATER then c2 = ice[l2 + 1]
@@ -572,11 +631,14 @@ function wall_runs()
 end
 
 function wall_col(tx, ty)
-  if not lightfx then return RAMPS[theme.cold][FLAT_WALL + 1] end
+  local m = mottle[ty][tx]
+  if not lightfx then
+    return RAMPS[theme.cold][clamp(FLAT_WALL + m, 0, 3) + 1]
+  end
   local lx, ly = tx * SUB + 1, ty * SUB + 1
-  local l = lmap[ly][lx]
+  local l = clamp(lmap[ly][lx] + m, 0, 3)
   local r = wmap[ly][lx] and RAMPS[theme.warm] or RAMPS[theme.cold]
-  return r[min(l + 1, 4)]
+  return r[l + 1]
 end
 
 -- ============================================================== 05_render ==
@@ -597,7 +659,34 @@ function room_draw()
             vx(r.x1) + TS - 1, vy(r.ty) + TS - 1, FLOOR_Z - 1, r.c)
   end
   for t in all(n.torch) do torch_draw(t) end
+  for p in all(n.props) do prop_draw(p) end
   if n.stair then stairs_draw(n.stair) end
+end
+
+-- Drawn standing on the pillar tile it replaced, taller than the wall around
+-- it so it reads as a monument rather than masonry.
+function prop_draw(p)
+  local x, y = vx(p.x) + 3, vy(p.y) + 3
+  local l = clamp(cell_light(p.x, p.y), 0, 3)
+  if p.kind == "statue" then
+    local c = RAMPS.bone[l + 1]
+    boxfill(x - 2, y - 2, 52, x + 2, y + 2, 57, RAMPS.cold[l + 1])   -- plinth
+    boxfill(x - 1, y - 1, 46, x + 1, y + 1, 51, c)                   -- body
+    boxfill(x - 1, y - 1, 43, x + 1, y + 1, 45, c)                   -- head
+    vset(x - 1, y + 1, 44, 0)                                        -- eyes,
+    vset(x + 1, y + 1, 44, 0)                                        -- on the near face
+  else
+    local lit = p.used and 5 or 10
+    local c = RAMPS[theme.warm][l + 1]
+    boxfill(x - 2, y - 2, 53, x + 2, y + 2, 57, RAMPS.cold[l + 1])
+    boxfill(x - 1, y - 1, 48, x + 1, y + 1, 52, c)
+    boxfill(x - 1, y - 1, 45, x + 1, y + 1, 47, p.used and 5 or theme.acc)
+    if not p.used then
+      local a = frame * 0.012
+      vset(flr(x + cos(a) * 3), flr(y - sin(a) * 3), 44, lit)
+      vset(flr(x - cos(a) * 3), flr(y + sin(a) * 3), 44, lit)
+    end
+  end
 end
 
 function stairs_draw(s)
@@ -892,10 +981,11 @@ function item_roll(d)
   local pool = { 1, 1, 1, 2, 2, 2, 2, 14, 14, 3, 3, 8, 9, 10, 11, 12, 13 }
   -- Every armour piece used to be gated behind d >= 2, which meant the one
   -- floor where you have no armour at all was also the only floor where none
-  -- could drop. Helms now appear from the start.
-  add(pool, 4) add(pool, 5)
-  if d >= 2 then add(pool, 6) end
-  if d >= 3 then add(pool, 7) end
+  -- could drop. Helms and breastplates now appear from the start, which puts
+  -- floor 1's ceiling at 5 of the maximum 7; shields still wait for floor 2,
+  -- so there is somewhere left to go.
+  add(pool, 4) add(pool, 5) add(pool, 6)
+  if d >= 2 then add(pool, 7) end
   return pick(pool)
 end
 
@@ -1080,6 +1170,14 @@ function try_move(dir)
   if nx < 0 or ny < 0 or nx >= n.w or ny >= n.h then return end
   local t = n.tile[ny][nx]
 
+  for p in all(n.props) do
+    if p.x == nx and p.y == ny then
+      prop_touch(p)
+      end_turn()
+      return
+    end
+  end
+
   if t == T_DOOR then
     local ex = n.exits[dir]
     if ex then
@@ -1100,11 +1198,57 @@ function try_move(dir)
   hero.anim = MOVE_FR
   for i = #n.items, 1, -1 do
     local it = n.items[i]
-    if it.x == nx and it.y == ny and item_take(it) then
-      deli(n.items, i)
+    if it.x == nx and it.y == ny then
+      -- Scrolls and potions ask first. Everything else is unambiguously good
+      -- and taking it silently is the right call; a chicken potion is not.
+      if ITEMS[it.ii].k == "spell" and not it.declined then
+        pending = it
+      elseif item_take(it) then
+        deli(n.items, i)
+      end
     end
   end
+  -- walking off a refused scroll lets it ask again next time
+  for it in all(n.items) do
+    if it.x ~= hero.tx or it.y ~= hero.ty then it.declined = false end
+  end
   end_turn()
+end
+
+-- A statue talks. A shrine does one thing, once, and then only talks.
+function prop_touch(p)
+  if p.kind == "statue" then
+    local st = STATUES[p.si]
+    say(st.n, st.say)
+    sfx_safe("ui_click")
+    return
+  end
+  local sh = SHRINES[p.si]
+  if p.used then
+    say(sh.n, "SPENT. IT WAS NICE ONCE")
+    sfx_safe("deny_error")
+    return
+  end
+  p.used = true
+  if sh.k == "heal" then
+    hp = min(hpmax, hp + 8)
+  elseif sh.k == "torch" then
+    torchfuel = 400
+  elseif sh.k == "gold" then
+    gold = gold + 20 + irnd(30)
+  else
+    -- repairs the most damaged piece you are actually wearing, which ties the
+    -- shrine to the armour slots rather than inventing a second currency
+    local wk, wv = nil, 99
+    for i = 1, #ARM_KINDS do
+      local k = ARM_KINDS[i]
+      if armv[k] > 0 and armv[k] < wv then wk, wv = k, armv[k] end
+    end
+    if wk then armv[wk] = wv + 1 arm_sync() end
+  end
+  say(sh.n, sh.say)
+  sfx_safe("shrine_powerup")
+  burst(p.x, p.y, 16, { 10, 7, 12 })
 end
 
 function end_turn()
@@ -1283,6 +1427,7 @@ function enter(i, from_dir)
   node.seen = true
   hero_place(from_dir)
   parts = {}
+  pending = nil
   light_alloc()
   light_build()
   sfx_safe("door_open")
@@ -1349,7 +1494,10 @@ function hud_draw()
     print("z-" .. SPELLINFO[spells[1]].n, 4, 20, SPELLINFO[spells[1]].c)
   end
 
-  if bark_t > 0 then
+  if pending then
+    print("pick up?  x yes  z no", 4, 28, 10)
+    print(sub(ITEMS[pending.ii].n, 1, 22), 4, 35, SPELLINFO[ITEMS[pending.ii].s].c)
+  elseif bark_t > 0 then
     print(sub(bark_who, 1, 22), 4, 28, 6)
     print(sub(bark_txt, 1, 22), 4, 35, 7)
   end
@@ -1394,6 +1542,7 @@ function new_game()
   parts = {}
   bark_t = 0
   killer = nil
+  pending = nil
   hero_init()
   floor_build(depth)
   enter(1, nil)
@@ -1450,7 +1599,22 @@ function _update()
 
   elseif mode == "play" then
     if rept > 0 then rept = rept - 1 end
-    if hero.anim == 0 then
+    if pending then
+      -- modal: movement is ignored until the prompt is answered
+      if btnp(4) then
+        for i = #node.items, 1, -1 do
+          if node.items[i] == pending then
+            if item_take(pending) then deli(node.items, i) end
+            break
+          end
+        end
+        pending = nil
+      elseif btnp(5) then
+        pending.declined = true
+        pending = nil
+        sfx_safe("ui_click")
+      end
+    elseif hero.anim == 0 then
       -- held direction repeats: a roguelike where you have to tap for every
       -- step of a long corridor is a roguelike nobody finishes
       local mv = 0

@@ -178,6 +178,22 @@ a 6-voxel tile looks like a rendering fault rather than a torch.
 - **Flicker:** each torch carries a phase; every 4 frames its radius wobbles by
   ±0.5 tile. Only the boundary tiles change level, so the picture breathes
   without churning.
+- **Count is 1..4 per node**, drawn at random from the eligible wall tiles —
+  not one every N tiles along every wall. Even spacing lit the whole perimeter
+  and the room read as flat. A few pools with darkness between them is what
+  makes torchlight look like torchlight, and it is also what gives the hero's
+  own torch something to do.
+
+### 2.1b Stone texture
+
+Flagstones are mottled by nudging the **light level** per tile by ±1, from an
+arithmetic hash rather than `rnd()` so the dungeon's PRNG stream is untouched.
+
+Perturbing light rather than painting a speckle colour is the whole trick: the
+mottling then reads correctly in every ramp, at every brightness, and in flat
+mode too. A fixed speckle colour would fight the torchlight and look wrong in
+half the themes. It costs one table lookup and two compares per cell in the RLE
+inner loop, and walls get it free since they are already coloured per tile.
 
 ### 2.2 Ramps
 
@@ -252,6 +268,13 @@ resource, an escape route and a light source at once.
 - Each room gets a **kind**: plain, pillared, flooded, treasure, shrine,
   library, kitchen (jokes live here), guard post, boss. Kind drives props,
   monster table and torch count.
+- **Some pillars are monuments.** About a fifth of the pillars in a pillared
+  chamber become a statue or a shrine. They occupy the wall tile they replaced,
+  so they block and shade exactly as a pillar did — the only difference is that
+  bumping one does something. Statues have names and a line to deliver; shrines
+  fire once and are then spent. The shrine that repairs armour deliberately
+  mends the *most damaged piece you are wearing*, tying it to the slots in §4.2
+  rather than inventing a second currency.
 - Stairs down in the room furthest from the entrance by graph distance.
 
 ### 3.2 Depth
@@ -332,8 +355,10 @@ piece a floor offers reached **armour 56 by floor 6**, and with damage floored
 at 1 that means every monster in the game does the minimum from floor 2 onward.
 The difficulty was switching itself off and nothing said so.
 
-Progression falls out of what each floor can drop: helms from floor 1
-(max 2), breastplates from floor 2 (max 5), shields from floor 3 (max 7).
+Progression falls out of what each floor can drop: helms and breastplates from
+floor 1 (max 5), shields from floor 2 (max 7). Across 200 floor-1 seeds, 175
+offer some armour and 101 offer a breastplate, for a mean of 2.7 available if
+you collect all of it.
 
 The wraith's drain damages the *best piece* by a point rather than shaving the
 total, which gives repair a path identical to acquisition: find another of that
@@ -530,8 +555,12 @@ not a rewrite.
 
 Six buttons is the whole input surface.
 
-- Arrows: move / attack by bumping
+- Arrows: move / attack by bumping, or bump a monument to read it
 - X: context action — pick up, open, descend, talk
+- **Scrolls and potions prompt before they are taken** (`x` yes, `z` no), and a
+  refused one stays on the floor. Everything else is unambiguously good and is
+  taken silently; a chicken potion is not. Walking off a refused scroll lets it
+  ask again.
 - Z: open the **radial item ring** — hold Z, arrows select, release to use.
   One button, no cursor, no menus.
 
