@@ -141,12 +141,26 @@ SHRINES = cfg("shrines", {
   { n = "shrine of small mercies", k = "heal",  say = "YOU FEEL A BIT BETTER" },
   { n = "font of stale water",     k = "torch", say = "YOUR TORCH DRINKS DEEP" },
   { n = "altar of tidy kit",       k = "arm",   say = "YOUR KIT LOOKS TIDIER" },
+  { n = "the whetstone",           k = "whet",  say = "IT TAKES AN EDGE" },
   { n = "the lost sock reliquary", k = "gold",  say = "A COIN. ODDLY WARM." },
   { n = "shrine of second wind",   k = "heal",  say = "THAT IS BETTER" },
 })
 
 ARM_KINDS = { "helm", "chest", "shield" }
 ARM_MSG = { helm = "A PROPER HELM", chest = "BREASTPLATE ON", shield = "SHIELD UP" }
+ARM_MAX = 7              -- 2 + 3 + 2, the number the damage curve is tuned to
+
+-- A weapon is a fourth rated slot, run exactly like the three armour ones.
+--
+-- Damage used to be the constant 2 the hero started with, and the only things
+-- that ever touched it took it *away* -- permanently, with nothing in the game
+-- able to give it back. Monsters meanwhile scale 1 + (depth-1) * 0.14, so by
+-- depth 13 they carried 2.7x the health against the same 2..4 a bump did on
+-- floor 1, and deep floors turned into arithmetic rather than difficulty.
+-- Armour progressed 0..7 and offence progressed not at all.
+DMG_BASE = 2             -- bare hands
+WPN_MAX  = 4
+SIGH_T   = 12            -- turns a sad ghost's sigh keeps your damage down
 
 -- Flat-light mode: every cell forced to one level, so the room is evenly lit
 -- and the torch pools vanish. Toggled on the title screen and remembered in
@@ -164,13 +178,28 @@ RAMPS = {
 }
 
 -- Depth bands. Each picks the cold/warm pair the level is painted with, plus
--- an accent used for doors, stairs and trim.
+-- an accent for doors, trim and the HUD.
+--
+-- The accent is a *ramp* (`accr`) as well as a bare index, because trim obeys
+-- the light like everything else: the skirting course and a statue's plaque
+-- take `RAMPS[accr][light]`, and `acc` is only the nominal colour, the one the
+-- trim shows at the level you mostly see it and the one the HUD prints in.
+-- §2.2's rule is that a material is a ramp indexed by light, and trim is a
+-- material.
+--
+-- Each accent ramp is deliberately *not* the theme's own stone: green trim on
+-- green warren stone is not trim, it is a slightly different green.
 THEMES = {
-  { name = "the crypt",   cold = "cold",  warm = "warm",  acc = 12, mon = 1 },
-  { name = "the cisterns", cold = "ice",  warm = "warm",  acc =  7, mon = 2 },
-  { name = "the warrens", cold = "moss",  warm = "warm",  acc = 11, mon = 3 },
-  { name = "the ossuary", cold = "bone",  warm = "warm",  acc = 15, mon = 4 },
-  { name = "the red floor", cold = "blood", warm = "warm", acc = 8, mon = 5 },
+  { name = "the crypt",   cold = "cold",  warm = "warm",
+    acc = 12, accr = "ice",   mon = 1 },       -- blue on grey
+  { name = "the cisterns", cold = "ice",  warm = "warm",
+    acc =  7, accr = "cold",  mon = 2 },       -- white on blue
+  { name = "the warrens", cold = "moss",  warm = "warm",
+    acc = 15, accr = "bone",  mon = 3 },       -- peach on green
+  { name = "the ossuary", cold = "bone",  warm = "warm",
+    acc =  8, accr = "blood", mon = 4 },       -- red on bone
+  { name = "the red floor", cold = "blood", warm = "warm",
+    acc =  7, accr = "cold",  mon = 5 },       -- white on red
 }
 
 -- tile codes
@@ -373,21 +402,34 @@ function node_build(n, d)
   -- room for either and would just become impassable
   n.props = {}
   if n.kind == "room" and n.w >= 11 and n.h >= 9 then
+    -- Pillars are placed by *count*, drawn from the lattice, not by rolling
+    -- every lattice cell. Rolling each cell at even odds put twelve pillars in
+    -- a full-size chamber, which read as a field of crates rather than
+    -- architecture -- and because a fixed share of pillars became monuments,
+    -- it also meant four statues and shrines standing about in one room.
+    -- Counting is also the only way to bound the number: the lattice grows
+    -- with the room, so a per-cell probability silently scales with area, the
+    -- same trap that took monster density from 2 to 5 (§14).
     if rnd(1) < 0.45 then
+      local cand = {}
       for py = 2, n.h - 3, 3 do
-        for px = 2, n.w - 3, 3 do
-          if rnd(1) < 0.5 then
-            n.tile[py][px] = T_WALL
-            -- roughly one pillar in four is worth reading
-            local r = rnd(1)
-            if r < 0.16 then
-              add(n.props, { x = px, y = py, kind = "shrine",
-                             si = irnd(#SHRINES) + 1, used = false })
-            elseif r < 0.36 then
-              add(n.props, { x = px, y = py, kind = "statue",
-                             si = irnd(#STATUES) + 1 })
-            end
-          end
+        for px = 2, n.w - 3, 3 do add(cand, { x = px, y = py }) end
+      end
+      local want = min(1 + irnd(4), #cand)
+      for i = 1, want do
+        local j = irnd(#cand) + 1
+        local c = cand[j]
+        deli(cand, j)
+        n.tile[c.y][c.x] = T_WALL
+        -- A monument is meant to be a find. At a fifth of a much larger pillar
+        -- count they were furniture; bumping one should be an event.
+        local r = rnd(1)
+        if r < 0.08 then
+          add(n.props, { x = c.x, y = c.y, kind = "shrine",
+                         si = irnd(#SHRINES) + 1, used = false })
+        elseif r < 0.20 then
+          add(n.props, { x = c.x, y = c.y, kind = "statue",
+                         si = irnd(#STATUES) + 1 })
         end
       end
     end
@@ -598,7 +640,7 @@ function cell_col(lx, ly)
   local t = cell_tile(lx, ly)
   local l = lmap[ly][lx]
   if t == T_WATER then return RAMPS.ice[l + 1] end
-  if t == T_DOOR then return l > 0 and theme.acc or 1 end
+  if t == T_DOOR then return RAMPS[theme.accr][l + 1] end
   if t == T_STAIR then return l > 0 and 10 or 4 end
   local r = wmap[ly][lx] and RAMPS[theme.warm] or RAMPS[theme.cold]
   return r[l + 1]
@@ -619,7 +661,8 @@ function light_runs()
   -- rather than called, the tile index comes from a lookup instead of a
   -- divide, and the merge key is an integer rather than a built string.
   local tile = node.tile
-  local rw, rc, ice, acc = RAMPS[theme.warm], RAMPS[theme.cold], RAMPS.ice, theme.acc
+  local rw, rc, ice = RAMPS[theme.warm], RAMPS[theme.cold], RAMPS.ice
+  local accr = RAMPS[theme.accr]
   for ly = 0, LH - 1 do
     local ty = tyof[ly]
     local trow, mrow = tile[ty], mottle[ty]
@@ -637,7 +680,7 @@ function light_runs()
         local c
         if t == T_FLOOR then c = (wrow[lx] and rw or rc)[l + 1]
         elseif t == T_WATER then c = ice[l + 1]
-        elseif t == T_DOOR then c = (l > 0) and acc or 1
+        elseif t == T_DOOR then c = accr[l + 1]
         else c = (l > 0) and 10 or 4 end
 
         local x0 = lx
@@ -651,7 +694,7 @@ function light_runs()
           local c2
           if t2 == T_FLOOR then c2 = (wrow[lx] and rw or rc)[l2 + 1]
           elseif t2 == T_WATER then c2 = ice[l2 + 1]
-          elseif t2 == T_DOOR then c2 = (l2 > 0) and acc or 1
+          elseif t2 == T_DOOR then c2 = accr[l2 + 1]
           else c2 = (l2 > 0) and 10 or 4 end
           if c2 ~= c then break end
           lx = lx + 1
@@ -686,28 +729,32 @@ function wall_runs()
       if n.tile[ty][tx] ~= T_WALL then
         tx = tx + 1
       else
-        local c, near = wall_col(tx, ty), is_near_wall(tx, ty)
+        local l, warm = wall_shade(tx, ty)
+        local near = is_near_wall(tx, ty)
         local x0 = tx
         tx = tx + 1
         while tx < n.w and n.tile[ty][tx] == T_WALL
-              and wall_col(tx, ty) == c and is_near_wall(tx, ty) == near do
+              and is_near_wall(tx, ty) == near do
+          local l2, w2 = wall_shade(tx, ty)
+          if l2 ~= l or w2 ~= warm then break end
           tx = tx + 1
         end
-        add(wruns, { x0 = x0, x1 = tx - 1, ty = ty, c = c, near = near })
+        add(wruns, { x0 = x0, x1 = tx - 1, ty = ty, l = l, warm = warm,
+                     near = near })
       end
     end
   end
 end
 
-function wall_col(tx, ty)
+-- A run carries its light *level*, not a finished colour, because the wall is
+-- drawn in three courses and each one wants a different entry of the same
+-- ramp. Returning the level is also cheaper than returning a colour: the merge
+-- test below compares two integers instead of indexing two ramp tables.
+function wall_shade(tx, ty)
   local m = mottle[ty][tx]
-  if not lightfx then
-    return RAMPS[theme.cold][clamp(FLAT_WALL + m, 0, 3) + 1]
-  end
+  if not lightfx then return clamp(FLAT_WALL + m, 0, 3), false end
   local lx, ly = tx * SUB + 1, ty * SUB + 1
-  local l = clamp(lmap[ly][lx] + m, 0, 3)
-  local r = wmap[ly][lx] and RAMPS[theme.warm] or RAMPS[theme.cold]
-  return r[l + 1]
+  return clamp(lmap[ly][lx] + m, 0, 3), wmap[ly][lx]
 end
 
 -- ============================================================== 05_render ==
@@ -723,18 +770,29 @@ function room_draw()
     boxfill(lx2v(r.x0), ly2v(r.ly0), FLOOR_Z,
             lx2v(r.x1) + LS - 1, ly2v(r.ly1) + LS - 1, FLOOR_B, r.c)
   end
-  -- Walls get three bands rather than one flat slab: a capping course on top,
-  -- the body, and a skirting at the floor. Each is one extra boxfill per run,
-  -- and the renderer's per-face shading does the rest -- it is the cheapest
-  -- way to make masonry read as built rather than extruded.
-  local capc = RAMPS[theme.cold][4]
+  -- Walls get three courses rather than one flat slab: a capping course on
+  -- top, the body, and a skirting at the floor. Each is one extra boxfill per
+  -- run, and the renderer's per-face shading does the rest -- it is the
+  -- cheapest way to make masonry read as built rather than extruded.
+  --
+  -- All three take their colour from the run's own light level. They used to
+  -- be constants -- the cap the top of the stone ramp, the skirting the bare
+  -- accent index -- which meant every wall in the room was capped in the
+  -- brightest white it had and skirted in full accent whether it stood under a
+  -- torch or in the pitch dark. That drew a bright wireframe over the whole
+  -- room and fought the torchlight everywhere: exactly the mistake §2.1b
+  -- avoids for the flagstone mottling, made at far greater visual weight. The
+  -- cap is a step up the same ramp, so it still reads as a separate course,
+  -- and the renderer shades it as a top face anyway.
+  local accr = RAMPS[theme.accr]
   for r in all(wruns) do
+    local ramp = r.warm and RAMPS[theme.warm] or RAMPS[theme.cold]
     local top = r.near and SILL_Z or WALL_Z
     local x0, x1 = vx(r.x0), vx(r.x1) + TS - 1
     local y0, y1 = vy(r.ty), vy(r.ty) + TS - 1
-    boxfill(x0, y0, top, x1, y1, FLOOR_Z - 1, r.c)
-    boxfill(x0, y0, top, x1, y1, top, capc)                    -- capping course
-    boxfill(x0, y0, FLOOR_Z - 2, x1, y1, FLOOR_Z - 1, theme.acc)  -- skirting
+    boxfill(x0, y0, top, x1, y1, FLOOR_Z - 1, ramp[r.l + 1])
+    boxfill(x0, y0, top, x1, y1, top, ramp[min(r.l + 2, 4)])      -- capping course
+    boxfill(x0, y0, FLOOR_Z - 2, x1, y1, FLOOR_Z - 1, accr[r.l + 1])  -- skirting
   end
   seams_draw()
   for t in all(n.torch) do torch_draw(t) end
@@ -747,9 +805,16 @@ end
 -- Flagstone seams: one long box per major gridline rather than per tile edge.
 -- Every tile edge would be right, and would also multiply the floor's run
 -- count several times over; every third is enough to read as large slabs.
+--
+-- A seam is a groove, so it takes the *bottom* of the ramp rather than a mid
+-- entry. That is the one colour that is right at every light level without
+-- splitting these long boxes per tile: under a torch it reads as a dark line
+-- between flagstones, and in an unlit stretch it is the same index as the
+-- floor and disappears, which is what an unlit groove should do. At index 2 it
+-- was brighter than the floor it crossed wherever the room was dark.
 function seams_draw()
   local n = node
-  local c = RAMPS[theme.cold][2]
+  local c = RAMPS[theme.cold][1]
   local x0, x1 = vx(1), vx(n.w - 1) - 1
   local y0, y1 = vy(1), vy(n.h - 1) - 1
   for ty = 3, n.h - 2, 3 do
@@ -794,6 +859,7 @@ function prop_draw(p)
   local l = clamp(cell_light(p.x, p.y), 0, 3)
   local stone = RAMPS.cold[l + 1]
   local dark = RAMPS.cold[max(l, 1)]
+  local acc = RAMPS[theme.accr][l + 1]   -- trim obeys the light, like the walls
 
   if p.kind == "statue" then
     local c = RAMPS.bone[l + 1]
@@ -801,7 +867,7 @@ function prop_draw(p)
     -- stepped plinth with an inscription band, then a figure on top of it
     boxfill(x - 3, y - 3, 55, x + 3, y + 3, 57, stone)
     boxfill(x - 2, y - 2, 52, x + 2, y + 2, 54, dark)
-    boxfill(x - 2, y + 2, 53, x + 2, y + 2, 53, theme.acc)     -- brass plaque
+    boxfill(x - 2, y + 2, 53, x + 2, y + 2, 53, acc)           -- brass plaque
     boxfill(x - 2, y - 2, 46, x + 2, y + 2, 51, c)             -- robed body
     boxfill(x - 3, y - 1, 47, x - 3, y + 1, 50, c)             -- arms folded
     boxfill(x + 3, y - 1, 47, x + 3, y + 1, 50, c)
@@ -815,7 +881,8 @@ function prop_draw(p)
     boxfill(x - 3, y - 3, 55, x + 3, y + 3, 57, stone)          -- base
     boxfill(x - 2, y - 2, 51, x + 2, y + 2, 54, dark)           -- column
     boxfill(x - 3, y - 3, 49, x + 3, y + 3, 50, stone)          -- bowl rim
-    boxfill(x - 2, y - 2, 50, x + 2, y + 2, 50, live and theme.acc or 5)
+    boxfill(x - 2, y - 2, 50, x + 2, y + 2, 50,
+            live and acc or RAMPS.cold[max(l, 1)])
     if live then
       -- a flame in the bowl, and two motes going round it
       local f = flr(frame / 4) % 3
@@ -841,9 +908,13 @@ function hero_init()
   -- a single point of armour reduces *every* depth-1 monster to that floor and
   -- makes the first floor harmless. The fix for dying on floor 1 was making
   -- armour findable there, not handing it over.
-  gold, arm, dmg = 0, 0, 2
+  -- You start bare-handed for the same reason you start unarmoured: floor 1 is
+  -- tuned against DMG_BASE, and a weapon is something to find.
+  gold, arm = 0, 0
   armv = { helm = 0, chest = 0, shield = 0 }
   helm, chest, shield, helm_pot = false, false, false, false
+  wpnv, sigh_t = 0, 0
+  wpn_sync()
   torchfuel = 250
   spells = {}
   spell_light, spell_conf, spell_chicken, spell_swap = 0, 0, 0, 0
@@ -860,6 +931,11 @@ function arm_sync()
   shield = armv.shield > 0
   if not helm then helm_pot = false end
 end
+
+-- dmg is derived from the weapon slot for the same reason arm is derived from
+-- the armour slots: the moment a number is both assigned to directly and
+-- meant to represent equipment, the two drift and nothing says so.
+function wpn_sync() dmg = DMG_BASE + wpnv end
 
 function hero_place(dir)
   local n = node
@@ -913,9 +989,16 @@ function hero_draw()
   if shield then
     boxfill(x - 2, y - 1, 52, x - 2, y + 1, 55, shade("cold", 1))
   end
-  -- weapon, angled toward the camera so it is never lost behind the body
-  local wz = hero.anim > 0 and 51 or 53
-  boxfill(x + 2, y + 1, wz, x + 2, y + 2, wz + 2, 6)
+  -- Weapon, angled toward the camera so it is never lost behind the body, and
+  -- growing with its rating: armour changes the drawn silhouette (§4) and the
+  -- weapon slot should read the same way. Bare-handed draws nothing, which is
+  -- the clearest possible statement that you have not found one yet.
+  if wpnv > 0 then
+    local wz = hero.anim > 0 and 51 or 53
+    local blade = wpnv >= 3 and shade("ice", 2) or 6
+    boxfill(x + 2, y + 1, wz - wpnv, x + 2, y + 2, wz + 1, blade)
+    boxfill(x + 2, y + 1, wz + 1, x + 2, y + 2, wz + 2, 4)      -- grip
+  end
   aura_draw(x, y)
 end
 
@@ -984,11 +1067,26 @@ BESTIARY = {
                          "A PERFORMANCE ISSUE" } },
 }
 
+-- The deepest thing the book has, worked out rather than written down twice.
+MON_DMAX = 0
+for i = 1, #BESTIARY do MON_DMAX = max(MON_DMAX, BESTIARY[i].d) end
+
+-- The roster is a sliding five-deep window, so early monsters retire as you
+-- descend -- but the window has to stop sliding once its bottom passes the
+-- deepest entry in the book. It did not: at depth 14 the range was 10..14, the
+-- bestiary tops out at 9, the pool came out empty and the `#pool == 0` guard
+-- quietly returned monster 1. Every monster on floors 14 and down was a sewer
+-- rat with scaled health, and nothing said so. Same shape as the armour-56
+-- bug: the difficulty switched itself off silently.
+--
+-- Anchoring the window to min(d, MON_DMAX) keeps the last roster in place for
+-- however deep the run goes. The boss gate still reads the real depth.
 function mon_roll(d)
+  local top = min(d, MON_DMAX)
   local pool = {}
   for i = 1, #BESTIARY do
     local b = BESTIARY[i]
-    if b.d <= d and b.d >= d - 4 and not (b.boss and d < 9) then add(pool, i) end
+    if b.d <= top and b.d >= top - 4 and not (b.boss and d < 9) then add(pool, i) end
   end
   if #pool == 0 then return 1 end
   return pick(pool)
@@ -1124,6 +1222,14 @@ ITEMS = {
   -- appended, not inserted: item_roll's pool and the live-armour drop refer
   -- to these by index, and renumbering the table would silently reassign them
   { n = "healing draught",  k = "heal", v = 14 },
+  -- Weapons, one rated slot: v is the rating, not a bonus, and a worse one is
+  -- refused and left on the floor exactly as a worse helm is. Best is 4, so
+  -- the best bump in the game does DMG_BASE + 4 + irnd(3) = 6..8 against
+  -- monsters carrying at most 2.7x their floor-1 health.
+  { n = "sharp stick",      k = "wpn",  v = 1 },
+  { n = "short sword",      k = "wpn",  v = 2 },
+  { n = "war hammer",       k = "wpn",  v = 3 },
+  { n = "rune blade",       k = "wpn",  v = 4 },
 }
 
 -- Food is deliberately common. Natural regen (REGEN) is slow enough that it
@@ -1138,6 +1244,13 @@ function item_roll(d)
   -- so there is somewhere left to go.
   add(pool, 4) add(pool, 5) add(pool, 6)
   if d >= 2 then add(pool, 7) end
+  -- Weapons ladder the same way armour does: something to find on floor 1, and
+  -- somewhere left to go for five floors after it. One entry each, so the slot
+  -- fills slower than armour's three do.
+  add(pool, 15)
+  if d >= 2 then add(pool, 16) end
+  if d >= 4 then add(pool, 17) end
+  if d >= 6 then add(pool, 18) end
   return pick(pool)
 end
 
@@ -1159,6 +1272,10 @@ function item_draw(it)
   elseif d.k == "oil" then
     boxfill(x, y, z - 1, x, y, z + 1, 9)
     vset(x, y + 1, z - 1, 10)
+  elseif d.k == "wpn" then
+    -- lying point-up, and the better it is the taller it stands
+    boxfill(x, y, z - 1 - d.v, x, y, z, d.v >= 3 and 12 or 6)
+    boxfill(x - 1, y, z, x + 1, y, z, 4)                    -- crossguard
   else
     boxfill(x - 1, y - 1, z, x + 1, y + 1, z + 1, d.pot and 5 or 6)
     vset(x, y + 1, z, 7)
@@ -1180,6 +1297,15 @@ function item_take(it)
     torchfuel = min(400, torchfuel + d.v)
     say("you", "TORCH TOPPED UP")
     sfx_safe("potion_powerup")
+  elseif d.k == "wpn" then
+    if d.v <= wpnv then
+      say("you", "YOURS IS BETTER")
+      return false                       -- leave it on the floor, unclaimed
+    end
+    wpnv = d.v
+    wpn_sync()
+    say("you", "YOU SWING IT ONCE")
+    sfx_safe("armour_equip")
   elseif d.k == "helm" or d.k == "chest" or d.k == "shield" then
     if d.v <= armv[d.k] then
       say("you", "ALREADY WEARING BETTER")
@@ -1243,9 +1369,13 @@ function cast(s)
       end
       m.slow = 2
     end
-    if rnd(1) < 0.1 then
-      dmg = max(1, dmg - 1)
-      say("you", "YOU BROKE YOUR SWORD")
+    -- Breaking your weapon costs a point of the *slot*, so the repair path is
+    -- the acquisition path -- find a better one, or a whetstone shrine. With
+    -- nothing in hand there is nothing to break.
+    if rnd(1) < 0.1 and wpnv > 0 then
+      wpnv = wpnv - 1
+      wpn_sync()
+      say("you", "YOU CHIPPED YOUR BLADE")
     else
       say("you", "PERCUSSIVE MAINTENANCE")
     end
@@ -1306,7 +1436,8 @@ function try_move(dir)
   for i = #n.mons, 1, -1 do
     local m = n.mons[i]
     if m.x == nx and m.y == ny then
-      local roll = dmg + irnd(3) + (spell_conf > 0 and 3 or 0)
+      local roll = max(1, dmg + irnd(3) + (spell_conf > 0 and 3 or 0)
+                          - (sigh_t > 0 and 2 or 0))
       if spell_conf > 0 and rnd(1) < 0.35 then
         say("you", "A CONFIDENT MISS")
       elseif spell_chicken > 0 then
@@ -1391,6 +1522,10 @@ function prop_touch(p)
     torchfuel = 400
   elseif sh.k == "gold" then
     gold = gold + 20 + irnd(30)
+  elseif sh.k == "whet" then
+    -- the weapon slot's answer to the tidy-kit altar: one point back, capped,
+    -- and nothing at all if you are still swinging your fists
+    if wpnv > 0 and wpnv < WPN_MAX then wpnv = wpnv + 1 wpn_sync() end
   elseif sh.k == "arm" then
     -- repairs the most damaged piece you are actually wearing, which ties the
     -- shrine to the armour slots rather than inventing a second currency
@@ -1414,6 +1549,7 @@ function end_turn()
     regen = 0
     if hp < hpmax then hp = hp + 1 end
   end
+  if sigh_t > 0 then sigh_t = sigh_t - 1 end
   if spell_light > 0 then spell_light = spell_light - 1 end
   if spell_conf > 0 then spell_conf = spell_conf - 1 end
   if spell_chicken > 0 then spell_chicken = spell_chicken - 1 end
@@ -1439,6 +1575,12 @@ end
 function mons_turn()
   local n = node
   for i = #n.mons, 1, -1 do
+    -- Stop the moment the hero is down. Without this the loop ran on and every
+    -- remaining monster attacked the corpse: die() fired once per attacker,
+    -- each one resetting the death screen's own timer, replaying the death
+    -- sound and the music, spawning another burst, and overwriting `killer` --
+    -- so the screen named whoever hit last rather than whoever killed you.
+    if mode ~= "play" then return end
     local m = n.mons[i]
     local b = BESTIARY[m.bi]
     if m.slow > 0 then
@@ -1488,8 +1630,13 @@ end
 function mon_attack(m, b)
   m.angry = true
   local hit = max(1, m.dmg - arm)
+  -- The sigh is a timed debuff, not a tax. It used to take a permanent point
+  -- of damage every turn it stood next to you, and since base damage is 2 with
+  -- a floor of 1, the *first* sigh took everything it could and no shrine,
+  -- item or floor in the game gave it back -- from a monster that deals no
+  -- damage at all, so there was no risk attached to the worst thing it did.
   if b.sigh then
-    dmg = max(1, dmg - 1)
+    sigh_t = SIGH_T
     say(b.n, "I EXPECTED MORE")
     return
   end
@@ -1626,28 +1773,29 @@ function hud_draw()
   -- Health is drawn, not printed. The host's font has no "|", and a missing
   -- glyph still advances the cursor, so a bar built out of pipes comes out as
   -- an invisible row of spaces.
-  -- Pips show max health as well as current: the empty ones are what tells
-  -- you a draught is worth drinking and that diving raised the ceiling.
-  -- Armour gets its own group beside them, because it is the other half of how
-  -- long you live and a number buried in a text line does not read as
-  -- something you should go looking for.
+  -- Three groups, in the order they keep you alive: health, armour, weapon.
+  -- Every group draws its *empty* slots too, in the dim pair. That is the
+  -- whole point of pips over a number -- an empty slot is what tells you a
+  -- draught is worth drinking, that diving raised the ceiling, and that there
+  -- is a better blade somewhere on this floor. Armour drew only what you had,
+  -- which quietly hid six sevenths of the thing it was meant to advertise.
   --
   -- They are down here rather than up in the sky band because they are what
   -- you look at most and there is exactly one row of frame below the room to
   -- put them in. It is also the nearest plane anything is drawn on, so they
   -- come out half again as large as the text above.
   set_draw_slice(HUD_BY)
-  for i = 1, min(hpmax, 20) do
-    local x = HUD_BX + (i - 1) * 3
-    local lit = i <= hp
-    line(x, HUD_BZ, x + 1, HUD_BZ, lit and (hp > 3 and 8 or 14) or 5)
-    line(x, HUD_BZ + 1, x + 1, HUD_BZ + 1, lit and (hp > 3 and 14 or 8) or 1)
+  local function pips(x0, n, count, lo, hi, dim)
+    for i = 1, n do
+      local x = HUD_BX + x0 + (i - 1) * 3
+      local on = i <= count
+      line(x, HUD_BZ, x + 1, HUD_BZ, on and lo or dim)
+      line(x, HUD_BZ + 1, x + 1, HUD_BZ + 1, on and hi or 1)
+    end
   end
-  for i = 1, min(arm, 10) do
-    local x = HUD_BX + 64 + (i - 1) * 4
-    line(x, HUD_BZ, x + 2, HUD_BZ, 6)
-    line(x, HUD_BZ + 1, x + 2, HUD_BZ + 1, 13)
-  end
+  pips(0,  min(hpmax, 20), hp,   hp > 3 and 8 or 14, hp > 3 and 14 or 8, 5)
+  pips(64, ARM_MAX,        arm,  6,  13, 5)
+  pips(88, WPN_MAX,        wpnv, 10,  9, 5)
 
   -- ---- the back plane, above the far wall: everything else -------------
   set_draw_slice(HUD_Y)

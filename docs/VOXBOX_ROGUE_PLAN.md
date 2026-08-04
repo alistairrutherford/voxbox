@@ -226,6 +226,28 @@ run each, and the renderer's per-face shading does the rest. Floors get seams
 on every third gridline — every tile edge would be correct and would also
 multiply the floor's run count, and every third reads as large slabs anyway.
 
+**All three courses take their colour from the run's own light level**, and for
+a while none of them did. The cap was hoisted out of the loop as the top of the
+stone ramp and the skirting was the bare accent index, so every wall in every
+room was capped in the brightest white it had and skirted in full accent —
+under a torch and in pitch darkness alike. That drew a bright wireframe over
+the whole floor plan and fought the torchlight everywhere: exactly the mistake
+§2.1b is careful to avoid for the mottling, committed at far greater visual
+weight, and it was most of why the dark half of a room never looked dark. The
+cap is now a step up the same ramp, which still reads as a separate course
+because the renderer shades a top face at 1.0 against the body's 0.80 anyway.
+
+Seams take the *bottom* of the ramp, because a seam is a groove. That is the
+one colour that is right at every light level without splitting those long
+boxes per tile: a dark line between flagstones under a torch, and the same
+index as the floor — invisible — in an unlit stretch. At a mid index it was
+brighter than the floor it crossed wherever the room was dark.
+
+The accent is a **ramp** (`accr`) as well as a bare index, since trim is a
+material and §2.2's rule applies to it. Each theme's accent ramp is
+deliberately not its own stone: green trim on green warren stone is not trim,
+it is a slightly different green.
+
 ### 2.1b Stone texture
 
 Flagstones are mottled by nudging the **light level** per tile by ±1, from an
@@ -316,12 +338,21 @@ resource, an escape route and a light source at once.
 - Each room gets a **kind**: plain, pillared, flooded, treasure, shrine,
   library, kitchen (jokes live here), guard post, boss. Kind drives props,
   monster table and torch count.
-- **Some pillars are monuments.** About a fifth of the pillars in a pillared
-  chamber become a statue or a shrine. They occupy the wall tile they replaced,
-  so they block and shade exactly as a pillar did — the only difference is that
-  bumping one does something. Statues have names and a line to deliver; shrines
-  fire once and are then spent. The shrine that repairs armour deliberately
-  mends the *most damaged piece you are wearing*, tying it to the slots in §4.2
+- **Pillars are placed by count, not by probability.** A pillared chamber gets
+  **1–4**, drawn at random from the 3-spaced lattice. Rolling each lattice cell
+  at even odds instead put twelve in a full-size chamber, which read as a field
+  of crates rather than architecture — and a per-cell probability silently
+  scales with room area, the same trap that took monster density from 2 to 5
+  (§14). Anything that should have a bounded count has to *be* a count.
+- **Some pillars are monuments**, and a monument is meant to be a find: 8% of
+  pillars become a shrine and a further 12% a statue. They occupy the wall tile
+  they replaced, so they block and shade exactly as a pillar did — the only
+  difference is that bumping one does something. Statues have names and a line
+  to deliver; shrines fire once and are then spent. Measured over 8 floors that
+  is **~1 monument per floor**, against the 7.5 a fifth-of-twelve-pillars gave,
+  where they were furniture rather than an event. The shrine that repairs armour deliberately
+  mends the *most damaged piece you are wearing*, and the whetstone puts a
+  point back on the weapon slot — both tied to the slots in §4.2 and §4.3
   rather than inventing a second currency.
 - **Monument text lives in the manifest, not the cart.** It is the one part of
   this game that is pure content, so `config.statues` and `config.shrines` in
@@ -342,6 +373,17 @@ Depth `d` scales monster tables, count, stats, and the theme (§2.2). Roughly:
 d1–3 crypt, d4–6 caves, d7–9 hell, d10 boss. Difficulty is raised by *tables and
 counts*, not by multiplying numbers — a deeper floor introduces new monsters and
 new light conditions rather than the same rat with 4x HP.
+
+The roster is a **sliding five-deep window** over the bestiary, so early
+monsters retire as you descend — and the window has to stop sliding once its
+bottom passes the deepest entry in the book. It did not. The bestiary tops out
+at d9, so from depth 14 the range was 10–14, the pool came out empty, and the
+`#pool == 0` guard quietly returned monster 1: every monster on floors 14 and
+below was **a sewer rat with scaled health**, and nothing said so. Precisely
+the shape of the armour-56 bug — the difficulty switching itself off in
+silence — which is the argument for the harness printing rosters rather than
+someone playing far enough down to notice. Anchoring the window to
+`min(d, MON_DMAX)` holds the last roster for however deep a run goes.
 
 ### 3.3 Save is a seed, not a map
 
@@ -415,8 +457,8 @@ at 1 that means every monster in the game does the minimum from floor 2 onward.
 The difficulty was switching itself off and nothing said so.
 
 Progression falls out of what each floor can drop: helms and breastplates from
-floor 1 (max 5), shields from floor 2 (max 7). Across 200 floor-1 seeds, 175
-offer some armour and 101 offer a breastplate, for a mean of 2.7 available if
+floor 1 (max 5), shields from floor 2 (max 7). Across 200 floor-1 seeds, 171
+offer some armour and 91 offer a breastplate, for a mean of 2.4 available if
 you collect all of it.
 
 The wraith's drain damages the *best piece* by a point rather than shaving the
@@ -425,7 +467,52 @@ kind and it replaces the damaged one. Nothing else restores armour, and nothing
 needs to.
 
 Armour gets its own row of HUD pips beside health, because a number buried in a
-text line does not read as something worth going to look for.
+text line does not read as something worth going to look for. Every group draws
+its **empty** slots as well as its full ones — that is the whole point of pips
+over a number, and armour drew only what you had for a long time, quietly
+hiding six sevenths of the thing it existed to advertise.
+
+### 4.3 The weapon, and why offence is a slot too
+
+A fourth rated slot, run exactly like the three armour ones: `dmg` is derived
+from it and never assigned, a better weapon replaces what you carry, a worse
+one is refused and left on the floor. Ratings 1..4 — sharp stick, short sword,
+war hammer, rune blade — laddered by depth the way armour is, so there is
+something to find on floor 1 and somewhere left to go for five floors after it.
+
+It had to exist because **offence was the one number in the game that could
+only go down.** Damage was the constant 2 the hero started with; the sad
+ghost's sigh and a botched Percussive Maintenance took points off it
+permanently, and nothing — no item, no shrine, no floor — gave one back.
+Meanwhile monsters scale `1 + (depth-1) * 0.14`. The harness prints the curve:
+
+| depth | toughest monster | hits, bare-handed | hits, best weapon |
+|---|---|---|---|
+| 1 | 6 hp | 2 | 1 |
+| 5 | 31 hp | 11 | 5 |
+| 9 | 84 hp | 28 | 12 |
+| 13 | 107 hp | 36 | 16 |
+
+Bare-handed is the old curve, and it is not difficulty, it is arithmetic.
+Armour progressed 0→7 and offence progressed not at all, so a deep floor got
+harder only in the sense that everything took three times as many identical
+bumps. Mean damage now grows 2.3× against health's 2.7×, which leaves the game
+*slightly* harder with depth — which is the point of depth.
+
+Two consequences follow from making it a slot rather than a number. A botched
+Percussive Maintenance chips the **rating**, so the repair path is the
+acquisition path, exactly as with the wraith's drain — find a better one, or a
+whetstone shrine. And the sad ghost's sigh becomes a **timed** debuff (−2 for
+12 turns) instead of a permanent tax: base damage is 2 with a floor of 1, so
+the *first* sigh used to take everything it could, from a monster that deals no
+damage at all and therefore carried no risk to balance it. Measured over 400
+bumps it now costs 5.05 damage per hit against 2.96 while it lasts, and then
+wears off.
+
+The weapon is drawn on the hero and grows with its rating, because §4's whole
+argument is that equipment should change the silhouette. Bare-handed draws no
+weapon at all, which is the clearest possible statement that you have not found
+one yet.
 
 The damage floor of 1 is why the hero starts with **zero** armour: a single
 point reduces every depth-1 monster to the minimum and makes the first floor
@@ -480,7 +567,7 @@ and better looking than a faked alpha would be.
 | 3 | Hound | quadruped | charges in straight lines |
 | 4 | Wraith | floater | drains armour durability |
 | 4 | Animated Armour | biped | drops the armour it is wearing |
-| 4 | Disappointed Ghost | floater | lowers your damage by sighing |
+| 4 | Disappointed Ghost | floater | sighs, and your damage drops for 12 turns |
 | 5 | Cave Troll | tall | smashes walls — the room changes shape |
 | 5 | Spider Matriarch | quadruped | webs slow you |
 | 6 | Lich Accountant | biped | summons; denies your expenses |

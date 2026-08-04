@@ -35,7 +35,7 @@
 
   "_config_textures": "Per-flagstone mottling of walls and floors -- a plus/minus one nudge to the light level from an arithmetic hash, so it reads in every ramp rather than fighting the torchlight (VOXBOX_ROGUE_PLAN 2.1b). Off by default while the look is undecided: it also drops the floor's run count, since a flat-lit stretch collapses to one box again. Masonry banding and flagstone seams are structure, not texture, and are not affected.",
 
-  "_config_monuments": "Statue and shrine text, the one part of the cart that is pure content. Statues are text only, so the list can grow as long as you like for nothing. A shrine also names a kind, and only the four the cart implements do anything: heal (+8 health), torch (refills the torch), arm (repairs the worst piece you are wearing), gold (a handful of coins). An unrecognised kind still speaks and is still spent once -- it just has no effect -- so a typo degrades rather than crashes. Both fields are drawn in the HUD banner: names and lines are written to 24 characters, which is what fits a row on the back plane beside the minimap column, and the font is A-Z 0-9 and ! \" ' ( ) + , - . / : ? _ (runtime/js/font.js). Anything else advances the cursor and draws nothing.",
+  "_config_monuments": "Statue and shrine text, the one part of the cart that is pure content. Statues are text only, so the list can grow as long as you like for nothing. A shrine also names a kind, and only the five the cart implements do anything: heal (+8 health), torch (refills the torch), arm (repairs the worst piece you are wearing), whet (a point back on the weapon slot, if you carry one), gold (a handful of coins). An unrecognised kind still speaks and is still spent once -- it just has no effect -- so a typo degrades rather than crashes. Both fields are drawn in the HUD banner: names and lines are written to 24 characters, which is what fits a row on the back plane beside the minimap column, and the font is A-Z 0-9 and ! \" ' ( ) + , - . / : ? _ (runtime/js/font.js). Anything else advances the cursor and draws nothing.",
 
   "config": {
     "textures": false,
@@ -75,6 +75,9 @@
       { "n": "altar of tidy kit",        "k": "arm",   "say": "YOUR KIT LOOKS TIDIER" },
       { "n": "the lost property altar",  "k": "arm",   "say": "SOMEONE ELSE LEFT THIS" },
       { "n": "the armourers rest",       "k": "arm",   "say": "DENTS HAMMERED OUT" },
+      { "n": "the whetstone",            "k": "whet",  "say": "IT TAKES AN EDGE" },
+      { "n": "the grinding wheel",       "k": "whet",  "say": "SHARP ENOUGH TO REGRET" },
+      { "n": "a soldiers memorial",      "k": "whet",  "say": "HE LEFT YOU HIS EDGE" },
       { "n": "the lost sock reliquary",  "k": "gold",  "say": "A COIN. ODDLY WARM." },
       { "n": "the tax collectors urn",   "k": "gold",  "say": "SOME OF IT COMES BACK" },
       { "n": "a wishing well, dry",      "k": "gold",  "say": "A COIN. NO WISH." }
