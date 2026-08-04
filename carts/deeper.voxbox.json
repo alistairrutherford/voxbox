@@ -37,8 +37,21 @@
 
   "_config_monuments": "Statue and shrine text, the one part of the cart that is pure content. Statues are text only, so the list can grow as long as you like for nothing. A shrine also names a kind, and only the five the cart implements do anything: heal (+8 health), torch (refills the torch), arm (repairs the worst piece you are wearing), whet (a point back on the weapon slot, if you carry one), gold (a handful of coins). An unrecognised kind still speaks and is still spent once -- it just has no effect -- so a typo degrades rather than crashes. Both fields are drawn in the HUD banner: names and lines are written to 24 characters, which is what fits a row on the back plane beside the minimap column, and the font is A-Z 0-9 and ! \" ' ( ) + , - . / : ? _ (runtime/js/font.js). Anything else advances the cursor and draws nothing.",
 
+  "_config_fx": "Every visual flourish, as a named flag. Each one exists because something was measurably wrong without it, so they all default on except `textures`, which is still on trial -- turn any of them off to see what it was doing. textures: per-flagstone mottling of walls and floors (VOXBOX_ROGUE_PLAN 2.1b). wall_floor: walls never fall below light level 1, because index 1 of every ramp is the same navy and an unlit wall was literally the same colour as the unlit floor in front of it, leaving the room with no shape at all outside the torch pools. jitter: perturbs the squared distance per cell so light pools have ragged edges instead of compass-drawn arcs -- dithering the boundary would have been the textbook answer and would have wrecked the two RLE passes, since a checkerboard has no runs. hero_crest: two voxels of pink on the hero's head in a fixed colour the light map never touches, because everything else about him is drawn from the same ramps as a statue. arches: a lintel over each far-wall doorway, so exits are visible from across a dark room. liquid: water cycles its ramp along a travelling sine, drawn over the floor's cached runs rather than inside them. decals: blood and scorch stay where they were made for the life of the floor, lit like everything else so a stain in the dark is invisible. dissolve: rooms assemble over eight frames on entry instead of cutting in. damage_numbers: the number prints in the world on the target's own y-slice, which is exact rather than a guess at a projection the cart cannot do. theme_torches: each depth's torch pools use their own ramp -- all five themes named the same orange before, which switched off half the point of having two ramps per theme.",
+
   "config": {
-    "textures": false,
+    "fx": {
+      "textures": false,
+      "wall_floor": true,
+      "jitter": true,
+      "hero_crest": true,
+      "arches": true,
+      "liquid": true,
+      "decals": true,
+      "dissolve": true,
+      "damage_numbers": true,
+      "theme_torches": true
+    },
 
     "statues": [
       { "n": "a forgotten king",       "say": "HE LOOKS DISAPPOINTED" },

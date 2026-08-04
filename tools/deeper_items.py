@@ -123,6 +123,63 @@ print("hits to kill the toughest monster on a floor:")
 print("  " + lua.globals().vb_call("probe_curve", depths))
 
 
+# The boss fight, simulated with the real combat code -- real telegraph, real
+# escalation, real armour drain -- because the closed form got it wrong twice.
+# Escalation and the drain interact: by the seventh landed strike there is no
+# armour left to subtract, which no static estimate caught. It is a gear check,
+# so it is checked at four levels of kit and must stay winnable at the top and
+# lethal at the bottom.
+lua.globals().vb_load(r'''
+function probe_bossfight(d, wpn, drink)
+  srand(d * 7717)
+  depth = d mode = "play"
+  floor_build(d)
+  enter(stair_node, nil)
+  wpnv = wpn wpn_sync()
+  armv = { helm = 2, chest = 3, shield = 2 } arm_sync()
+  hpmax = HP_START + DIVE_MAX * (d - 1)
+  hp = hpmax
+  local bm = boss_mon()
+  if not bm then return "NO BOSS ON A BOSS FLOOR" end
+  local hp0, arm0, dmg0 = bm.hp, bm.arm, bm.dmg
+  local turns, heals = 0, 0
+  while bm.hp > 0 and hp > 0 and turns < 400 do
+    turns = turns + 1
+    local idx = 0
+    for i = 1, #node.mons do if node.mons[i] == bm then idx = i end end
+    if idx > 0 then mon_hurt(idx, dmg + 1) end
+    if bm.hp <= 0 then break end
+    mon_attack(bm, BESTIARY[bm.bi])
+    if drink > 0 and hp <= hpmax * 0.3 and heals < drink then
+      hp = min(hpmax, hp + 14) heals = heals + 1
+    end
+  end
+  return "d" .. d .. " wpn" .. wpn .. "/" .. drink .. "draught: boss " .. hp0 ..
+         "hp arm" .. arm0 .. " dmg" .. dmg0 .. " -> " .. turns .. " turns, " ..
+         max(0, hp) .. "/" .. hpmax .. " left" ..
+         (hp > 0 and "  WIN" or "  dead")
+end
+
+function probe_bossfloors(upto)
+  local out = ""
+  for d = 1, upto do
+    floor_build(d)
+    local n, locked = 0, false
+    for i = 1, #nodes do
+      for m in all(nodes[i].mons) do if m.boss then n = n + 1 end end
+    end
+    if is_boss_floor(d) ~= (n > 0) then out = out .. " d" .. d .. " MISMATCH" end
+    if n > 1 then out = out .. " d" .. d .. " HAS " .. n end
+  end
+  return out == "" and "every 10th floor has exactly one boss, no other floor has any"
+         or out
+end''', "boss")
+print("boss floors: " + str(lua.globals().vb_call("probe_bossfloors", 30)))
+for d in (10, 20, 30):
+    for wpn, drink in ((4, 1), (4, 0), (0, 1)):
+        print("  " + str(lua.globals().vb_call("probe_bossfight", d, wpn, drink)))
+
+
 # Two failures that were silent in play, so they get printed every run: a
 # roster that empties out past the deepest monster in the book and falls back
 # to sewer rats, and a death that fires once per adjacent attacker.

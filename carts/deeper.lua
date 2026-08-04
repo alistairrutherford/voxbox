@@ -98,6 +98,7 @@ MAX_PART = 80            -- particle cap: each one is a vset
 -- tick back up at that rate is just tedium. Leaving the fight switches rate.
 REGEN     = 14           -- turns per point while anything is hunting you
 REGEN_CALM = 3           -- turns per point once nothing in the node is awake
+HP_START  = 16           -- and what you start a run with
 DIVE_HEAL = 8            -- restored on reaching a new floor
 DIVE_MAX  = 2            -- and permanent max health for getting there
 AGGRO     = 6            -- tiles at which a monster notices you
@@ -114,10 +115,35 @@ function cfg(key, dflt)
   return v
 end
 
--- Per-flagstone mottling of walls and floors (see light_alloc). Off by
--- default while the look is undecided -- and it is a run-count saving as well
--- as a look, since a flat-lit stretch of floor collapses back to one box.
-TEXTURES = cfg("textures", false) == true
+-- Every visual flourish is a named flag under `config.fx`, so a look can be
+-- tried, judged and dropped without a code edit -- which is how `textures`
+-- came to be off. Read once into locals-in-name-only rather than through fx()
+-- per call: several of these are tested inside the light map's inner loop,
+-- which runs ~10k times a rebuild, and a table lookup plus a nil test there is
+-- not free.
+--
+-- Defaults are what the cart does with no manifest beside it at all. All of
+-- them are on except the mottling, because each one fixes something that was
+-- measurably wrong; `textures` is the one still on trial.
+FX = cfg("fx", {})
+function fx(key, dflt)
+  local v = FX[key]
+  if v == nil then return dflt end
+  return v == true
+end
+
+FX_TEXTURES  = fx("textures", false)      -- per-flagstone mottling (§2.1b)
+FX_WALLFLOOR = fx("wall_floor", true)     -- walls never go fully dark
+FX_JITTER    = fx("jitter", true)         -- ragged light-pool edges
+FX_CREST     = fx("hero_crest", true)     -- the hero is never lost in a crowd
+FX_ARCHES    = fx("arches", true)         -- doorways read as doorways
+FX_LIQUID    = fx("liquid", true)         -- water moves
+FX_DECALS    = fx("decals", true)         -- rooms remember their dead
+FX_DISSOLVE  = fx("dissolve", true)       -- rooms build up on entry
+FX_DMGNUM    = fx("damage_numbers", true) -- damage prints over the target
+FX_THEMETORCH = fx("theme_torches", true) -- each depth lights differently
+
+TEXTURES = FX_TEXTURES
 
 -- Some pillars are not pillars. A monument occupies a wall tile like any
 -- other pillar -- it blocks, it casts, it is drawn where the pillar was -- but
@@ -173,6 +199,8 @@ RAMPS = {
   warm  = { 1,  4,  9, 10 },   -- stone under a torch
   moss  = { 1,  3, 11, 10 },
   blood = { 1,  2,  8, 14 },
+  gold  = { 1,  4, 10,  7 },   -- a cold, pale torch
+  ember = { 1,  2,  8,  9 },   -- a low, red one
   ice   = { 1, 13, 12,  7 },
   bone  = { 1,  5,  6, 15 },
 }
@@ -189,18 +217,27 @@ RAMPS = {
 --
 -- Each accent ramp is deliberately *not* the theme's own stone: green trim on
 -- green warren stone is not trim, it is a slightly different green.
+-- `warm` is the ramp *inside* a torch pool and `cold` the stone away from one.
+-- All five themes used to name "warm" for the pool, so every floor's
+-- torchlight was the same orange whatever the stone around it -- half the
+-- variety the two-ramp scheme was built for, switched off by one repeated
+-- field. Each depth now lights differently: pale gold in the cisterns, a low
+-- red ember in the warrens. `theme_torches` off restores the single orange.
 THEMES = {
   { name = "the crypt",   cold = "cold",  warm = "warm",
     acc = 12, accr = "ice",   mon = 1 },       -- blue on grey
-  { name = "the cisterns", cold = "ice",  warm = "warm",
+  { name = "the cisterns", cold = "ice",  warm = "gold",
     acc =  7, accr = "cold",  mon = 2 },       -- white on blue
-  { name = "the warrens", cold = "moss",  warm = "warm",
+  { name = "the warrens", cold = "moss",  warm = "ember",
     acc = 15, accr = "bone",  mon = 3 },       -- peach on green
   { name = "the ossuary", cold = "bone",  warm = "warm",
     acc =  8, accr = "blood", mon = 4 },       -- red on bone
-  { name = "the red floor", cold = "blood", warm = "warm",
+  { name = "the red floor", cold = "blood", warm = "gold",
     acc =  7, accr = "cold",  mon = 5 },       -- white on red
 }
+if not FX_THEMETORCH then
+  for i = 1, #THEMES do THEMES[i].warm = "warm" end
+end
 
 -- tile codes
 T_VOID, T_FLOOR, T_WALL, T_DOOR, T_STAIR, T_WATER = 0, 1, 2, 3, 4, 5
@@ -358,6 +395,7 @@ function floor_build(d)
   n.tile[n.stair.y][n.stair.x] = T_STAIR
 
   for i = 1, #nodes do node_populate(nodes[i], d, i) end
+  boss_place(d)
   return 1
 end
 
@@ -401,6 +439,8 @@ function node_build(n, d)
   -- pillars and puddles, chambers only: a corridor three tiles wide has no
   -- room for either and would just become impassable
   n.props = {}
+  n.water = {}
+  n.decals = {}
   if n.kind == "room" and n.w >= 11 and n.h >= 9 then
     -- Pillars are placed by *count*, drawn from the lattice, not by rolling
     -- every lattice cell. Rolling each cell at even odds put twelve pillars in
@@ -437,7 +477,12 @@ function node_build(n, d)
       local wx, wy = 2 + irnd(n.w - 6), 2 + irnd(n.h - 5)
       for y = wy, min(wy + 2, n.h - 2) do
         for x = wx, min(wx + 3, n.w - 2) do
-          if n.tile[y][x] == T_FLOOR then n.tile[y][x] = T_WATER end
+          if n.tile[y][x] == T_FLOOR then
+            n.tile[y][x] = T_WATER
+            -- kept as a list as well as a tile code, so water_draw does not
+            -- rescan the whole grid every frame to find a dozen tiles
+            add(n.water, { x = x, y = y })
+          end
         end
       end
     end
@@ -564,6 +609,34 @@ function light_alloc()
   end
 end
 
+-- Ragged pool edges, without touching the number of light levels.
+--
+-- The bands are compass-drawn arcs and it is the most obvious artefact left in
+-- the room. Dithering the boundary is the textbook answer and it is the wrong
+-- one here: a checkerboard has no runs, so it would wreck the two RLE passes
+-- that make the whole light map affordable. Perturbing the *squared distance*
+-- per cell instead moves where the band falls rather than what colour a cell
+-- takes, so the edge goes organic while the interiors stay solid and the run
+-- count only grows along the boundary itself.
+--
+-- The offsets are scaled by the pool's own radius each time it is walked,
+-- because d2 is quadratic: a fixed nudge that shifts a big pool's edge by half
+-- a voxel would move a guttering torch's by three. Scaling holds the *outer*
+-- edge to about a voxel at any radius. The inner bands move further for the
+-- same offset, since the same slope is being read closer to the centre -- so
+-- the bright core is the raggedest part of the pool, which is the right way
+-- round: it reads as the flame guttering rather than the pool's reach moving.
+JIT_N = 32
+JIT, JITR = {}, {}
+for i = 0, JIT_N - 1 do JIT[i] = (i * 37) % 9 - 4 end
+for i = 0, JIT_N - 1 do JITR[i] = 0 end
+
+function jit_scale(r)
+  if not FX_JITTER then return end
+  local s = r * 0.5
+  for i = 0, JIT_N - 1 do JITR[i] = JIT[i] * s end
+end
+
 function light_build()
   local n = node
   if not lightfx then
@@ -589,13 +662,15 @@ function light_build()
     local r = 5.5 * SUB + sin(t.ph + flicker * 0.11) * 3.0
     local r2, b1, b2 = r * r, (r / 3) * (r / 3), (r * 2 / 3) * (r * 2 / 3)
     local warm2 = (r * 0.62) * (r * 0.62)
+    jit_scale(r)
     for y = max(0, flr(cy - r)), min(LH - 1, flr(cy + r)) do
       local lr, wr = lmap[y], wmap[y]
       local dy = y - cy
       local dy2 = dy * dy
+      local jrow = (y * 23) % JIT_N
       for x = max(0, flr(cx - r)), min(LW - 1, flr(cx + r)) do
         local dx = x - cx
-        local d2 = dx * dx + dy2
+        local d2 = dx * dx + dy2 + JITR[(x * 9 + jrow) % JIT_N]
         if d2 <= r2 then
           local l = (d2 <= b1) and 3 or ((d2 <= b2) and 2 or 1)
           if l > lr[x] then lr[x] = l end
@@ -610,13 +685,15 @@ function light_build()
   if spell_light > 0 then hr = hr + 3 * SUB end
   local hx, hy = hero.tx * SUB + 1, hero.ty * SUB + 1
   local hr2, hb = hr * hr, (hr / 2) * (hr / 2)
+  jit_scale(hr)
   for y = max(0, hy - hr), min(LH - 1, hy + hr) do
     local lr, wr = lmap[y], wmap[y]
     local dy = y - hy
     local dy2 = dy * dy
+    local jrow = (y * 23) % JIT_N
     for x = max(0, hx - hr), min(LW - 1, hx + hr) do
       local dx = x - hx
-      local d2 = dx * dx + dy2
+      local d2 = dx * dx + dy2 + JITR[(x * 9 + jrow) % JIT_N]
       if d2 <= hr2 then
         local l = (d2 <= hb) and 3 or 2
         if l > lr[x] then lr[x] = l end
@@ -750,11 +827,18 @@ end
 -- drawn in three courses and each one wants a different entry of the same
 -- ramp. Returning the level is also cheaper than returning a colour: the merge
 -- test below compares two integers instead of indexing two ramp tables.
+-- Walls bottom out one step above the floor, and that is legibility rather
+-- than decoration: index 1 of every ramp is the same navy, so an unlit wall
+-- and the unlit floor in front of it were literally the same colour and the
+-- room had no shape at all outside the torch pools -- only the capping course
+-- gave the edge away, one voxel of it. A floor of level 1 keeps walls reading
+-- as boundaries in the dark without lighting what is standing against them.
 function wall_shade(tx, ty)
   local m = mottle[ty][tx]
-  if not lightfx then return clamp(FLAT_WALL + m, 0, 3), false end
+  local lo = FX_WALLFLOOR and 1 or 0
+  if not lightfx then return clamp(FLAT_WALL + m, lo, 3), false end
   local lx, ly = tx * SUB + 1, ty * SUB + 1
-  return clamp(lmap[ly][lx] + m, 0, 3), wmap[ly][lx]
+  return clamp(lmap[ly][lx] + m, lo, 3), wmap[ly][lx]
 end
 
 -- ============================================================== 05_render ==
@@ -764,11 +848,27 @@ function is_near_wall(x, y)
   return x == node.w - 1 or y == node.h - 1
 end
 
+-- Rooms build up rather than cutting in (§7). The camera cannot move and the
+-- cart cannot fade the frame, so a hard cut between nodes is all the engine
+-- offers -- but the cart draws every voxel itself, so it can simply withhold
+-- most of them for a few frames and let the room assemble. The order is an
+-- arithmetic hash of the run index, not rnd(), so it costs nothing and does
+-- not touch the PRNG stream the dungeon seed depends on.
+DISSOLVE_T = 8
+
+function shown(i)
+  if dissolve <= 0 then return true end
+  return (i * 37) % DISSOLVE_T < DISSOLVE_T - dissolve
+end
+
 function room_draw()
   local n = node
-  for r in all(runs) do
-    boxfill(lx2v(r.x0), ly2v(r.ly0), FLOOR_Z,
-            lx2v(r.x1) + LS - 1, ly2v(r.ly1) + LS - 1, FLOOR_B, r.c)
+  for i = 1, #runs do
+    local r = runs[i]
+    if shown(i) then
+      boxfill(lx2v(r.x0), ly2v(r.ly0), FLOOR_Z,
+              lx2v(r.x1) + LS - 1, ly2v(r.ly1) + LS - 1, FLOOR_B, r.c)
+    end
   end
   -- Walls get three courses rather than one flat slab: a capping course on
   -- top, the body, and a skirting at the floor. Each is one extra boxfill per
@@ -785,19 +885,97 @@ function room_draw()
   -- cap is a step up the same ramp, so it still reads as a separate course,
   -- and the renderer shades it as a top face anyway.
   local accr = RAMPS[theme.accr]
-  for r in all(wruns) do
-    local ramp = r.warm and RAMPS[theme.warm] or RAMPS[theme.cold]
-    local top = r.near and SILL_Z or WALL_Z
-    local x0, x1 = vx(r.x0), vx(r.x1) + TS - 1
-    local y0, y1 = vy(r.ty), vy(r.ty) + TS - 1
-    boxfill(x0, y0, top, x1, y1, FLOOR_Z - 1, ramp[r.l + 1])
-    boxfill(x0, y0, top, x1, y1, top, ramp[min(r.l + 2, 4)])      -- capping course
-    boxfill(x0, y0, FLOOR_Z - 2, x1, y1, FLOOR_Z - 1, accr[r.l + 1])  -- skirting
+  for i = 1, #wruns do
+    local r = wruns[i]
+    if shown(i + 3) then      -- offset so walls and floor do not arrive together
+      local ramp = r.warm and RAMPS[theme.warm] or RAMPS[theme.cold]
+      local top = r.near and SILL_Z or WALL_Z
+      local x0, x1 = vx(r.x0), vx(r.x1) + TS - 1
+      local y0, y1 = vy(r.ty), vy(r.ty) + TS - 1
+      boxfill(x0, y0, top, x1, y1, FLOOR_Z - 1, ramp[r.l + 1])
+      boxfill(x0, y0, top, x1, y1, top, ramp[min(r.l + 2, 4)])      -- capping course
+      boxfill(x0, y0, FLOOR_Z - 2, x1, y1, FLOOR_Z - 1, accr[r.l + 1])  -- skirting
+    end
   end
   seams_draw()
+  water_draw()
+  decals_draw()
+  arches_draw()
   for t in all(n.torch) do torch_draw(t) end
   for p in all(n.props) do prop_draw(p) end
   if n.stair then stairs_draw(n.stair) end
+end
+
+-- A doorway is a gap in the wall, and from across a dark room a gap looks like
+-- nothing at all -- which made a node's exits invisible until you were on top
+-- of them. A lintel over the opening turns it into a shape you can read from
+-- the far side and navigate toward.
+--
+-- Far walls only. A near wall is a four-voxel sill (§1.2) with nothing above
+-- it to arch, and anything built up there would stand between the camera and
+-- the room, which is the whole reason the sill is a sill.
+function arches_draw()
+  if not FX_ARCHES then return end
+  local n = node
+  for dir = 1, 4 do
+    local d = n.door[dir]
+    if d and not is_near_wall(d.x, d.y) then
+      local l, warm = wall_shade(d.x, d.y)
+      local ramp = warm and RAMPS[theme.warm] or RAMPS[theme.cold]
+      local x0, x1 = vx(d.x), vx(d.x) + TS - 1
+      local y0, y1 = vy(d.y), vy(d.y) + TS - 1
+      boxfill(x0, y0, WALL_Z + 1, x1, y1, WALL_Z + 3, ramp[l + 1])
+      boxfill(x0, y0, WALL_Z, x1, y1, WALL_Z, ramp[min(l + 2, 4)])
+      boxfill(x0, y0, WALL_Z + 4, x1, y1, WALL_Z + 4, RAMPS[theme.accr][l + 1])
+    end
+  end
+end
+
+-- Water cycles its ramp along a travelling sine, so the surface visibly moves
+-- (§7). It is drawn over the top of the floor's RLE rather than inside it: the
+-- runs are cached and only rebuilt when a light level changes, and animating
+-- them per frame would throw away exactly the saving that makes the light map
+-- affordable. A puddle is a dozen tiles, so overdrawing it costs a dozen
+-- boxfills and leaves the cache alone.
+function water_draw()
+  if not FX_LIQUID then return end
+  local n = node
+  for w in all(n.water) do
+    local l = clamp(cell_light(w.x, w.y), 0, 3)
+    local s = sin(frame * 0.006 + (w.x * 2 + w.y) * 0.09)
+    local c = RAMPS.ice[clamp(l + (s > 0.35 and 1 or (s < -0.35 and -1 or 0)),
+                              0, 3) + 1]
+    boxfill(vx(w.x), vy(w.y), FLOOR_Z, vx(w.x) + TS - 1, vy(w.y) + TS - 1,
+            FLOOR_Z, c)
+  end
+end
+
+-- Blood and scorch stay where they were made, for as long as the floor lasts
+-- (§7). Rooms you have fought in look different from rooms you have not, which
+-- is the cheapest possible form of memory in a game that cuts hard between
+-- them and has a minimap too small to say much.
+--
+-- They light like everything else, so a stain in an unlit corner is navy and
+-- invisible -- the same rule the capping course had to learn. The list is
+-- capped because it is drawn every frame and a long fight should not quietly
+-- become a draw-call bill.
+DECAL_MAX = 20
+
+function decal(tx, ty, ramp)
+  if not FX_DECALS then return end
+  local n = node
+  if not n.decals then n.decals = {} end
+  if #n.decals >= DECAL_MAX then deli(n.decals, 1) end
+  add(n.decals, { x = tx, y = ty, r = ramp, o = irnd(3) - 1 })
+end
+
+function decals_draw()
+  if not FX_DECALS then return end
+  for d in all(node.decals or {}) do
+    local l = clamp(cell_light(d.x, d.y), 0, 3)
+    local x, y = vx(d.x) + 2 + d.o, vy(d.y) + 2
+    boxfill(x, y, FLOOR_Z, x + 1, y + 1, FLOOR_Z, RAMPS[d.r][l + 1])
+  end
 end
 
 -- Drawn standing on the pillar tile it replaced, taller than the wall around
@@ -903,7 +1081,7 @@ end
 -- from one.
 function hero_init()
   hero = { tx = 0, ty = 0, px = 0, py = 0, face = 3, anim = 0 }
-  hp, hpmax, regen = 16, 16, 0
+  hp, hpmax, regen = HP_START, HP_START, 0
   -- Starting armour is 0 on purpose. Damage has a floor of 1 (mon_attack), so
   -- a single point of armour reduces *every* depth-1 monster to that floor and
   -- makes the first floor harmless. The fix for dying on floor 1 was making
@@ -999,6 +1177,18 @@ function hero_draw()
     boxfill(x + 2, y + 1, wz - wpnv, x + 2, y + 2, wz + 1, blade)
     boxfill(x + 2, y + 1, wz + 1, x + 2, y + 2, wz + 2, 4)      -- grip
   end
+
+  -- A crest, in a fixed colour that ignores the light map entirely -- the only
+  -- thing on the hero that does. Everything else here is drawn from `cold`,
+  -- `warm` and `blood`, and so is a statue, so an armoured hero standing by a
+  -- monument read as a second statue; in an unlit corner he vanished outright.
+  -- Two voxels of pink is the whole fix, and it is the trick the monsters'
+  -- eyes already use.
+  if FX_CREST then
+    local hz = (helm and 48 or 49) + sway - 1
+    vset(x, y, hz, 14)
+    vset(x, y + 1, hz, 14)
+  end
   aura_draw(x, y)
 end
 
@@ -1067,6 +1257,135 @@ BESTIARY = {
                          "A PERFORMANCE ISSUE" } },
 }
 
+-- ============================================================== 07b_boss ==
+-- Every tenth floor is held by a boss, and the stairs do not work until it is
+-- dead. That gives a run a shape it did not have -- the only way one used to
+-- end was dying -- and it puts a wall across the depth curve at a place the
+-- numbers can be tuned for, rather than letting descent run to depth 30 where
+-- nothing was ever balanced.
+--
+-- The fight is built out of the pieces that already exist, not new systems:
+--
+--   armour   the boss wears its own, subtracting from your damage roll the way
+--            yours subtracts from its. Bare-handed you do the floored minimum
+--            of 1 and the fight is hopeless arithmetic; the weapon slot is
+--            what makes it winnable, so progression is the mechanic.
+--   health   its damage is heavy enough to matter against your armour, but it
+--            only lands every other turn -- it telegraphs. The wind-up turn is
+--            a real turn you may spend: step out of reach, drink, cast, or
+--            trade a hit for a hit. That halves incoming damage without
+--            halving the threat, and it is legible because the bark says so.
+--   drain    every landed strike takes a point off your best armour piece, so
+--            the fight erodes the thing keeping you alive and gets worse the
+--            longer it runs. Spare pieces and the tidy-kit shrine are the
+--            counter-play, which is the armour slots doing their job (§4.2).
+--   escalate at each third of its health it calls two monsters from the
+--            floor's own roster and its damage goes up. It never introduces a
+--            monster you have not already met on the way down.
+--
+-- Nothing here needs a new verb. You bump it, exactly as you bump everything.
+-- Its numbers are not multipliers on a bestiary row, because a multiplier on
+-- top of the depth curve compounds into nonsense -- the first attempt gave the
+-- depth-10 boss 198 health and 26 damage, a fight needing forty turns that
+-- killed a full-health hero in two. They are stated instead as what the fight
+-- should *be*: this many landed hits long, costing this share of a full health
+-- bar, against the kit the dungeon can actually produce by that depth. The
+-- stats fall out of those two numbers and the game's own constants, so they
+-- stay correct if the weapon cap or the armour cap ever moves.
+BOSS_EVERY = 10          -- a boss floor every tenth depth
+BOSS_ARM   = 2           -- subtracted from every hit you land on it, +1 a tier
+BOSS_TURNS = 15          -- how many landed hits the fight should take
+
+function boss_index()
+  for i = 1, #BESTIARY do if BESTIARY[i].boss then return i end end
+  return nil
+end
+
+function is_boss_floor(d) return d % BOSS_EVERY == 0 end
+
+-- Placed in the stair node, so the boss is between you and the way down by
+-- construction rather than by a rule that has to be enforced somewhere else.
+function boss_place(d)
+  boss_alive = false
+  if not is_boss_floor(d) then return end
+  local bi = boss_index()
+  if not bi then return end
+  local n = nodes[stair_node]
+  local x, y = spot(n)
+  if not x then return end
+  local m = mon_new(bi, x, y)
+  m.boss = true
+  m.arm = BOSS_ARM + flr(d / BOSS_EVERY) - 1
+  -- the kit the dungeon can produce by here: a full weapon slot rolls this on
+  -- average, a full set of armour is ARM_MAX, and max health is what diving
+  -- this far has bought
+  local roll = DMG_BASE + WPN_MAX + 1
+  local bar = HP_START + DIVE_MAX * (d - 1)
+  m.hp = BOSS_TURNS * max(1, roll - m.arm)
+  m.hp0 = m.hp
+  -- Damage: exactly cancels a full set of armour at the first boss floor, and
+  -- gains a point for every ten the hero's health bar has grown since. Its own
+  -- drain does the rest -- by the seventh landed strike there is no armour left
+  -- to subtract, which is why a flat number works against this monster and
+  -- would not against one that cannot strip it. Swept against the simulation
+  -- in tools/deeper_items.py rather than reasoned: escalation and the drain
+  -- interact, and the closed form was wrong twice.
+  local first = HP_START + DIVE_MAX * (BOSS_EVERY - 1)
+  m.dmg = ARM_MAX + flr(max(0, bar - first) / 10)
+  m.phase = 0
+  m.wind = 0
+  add(n.mons, m)
+  boss_alive = true
+end
+
+-- The boss gets worse as you win. Thirds rather than a smooth curve, so each
+-- step is a moment with a line attached to it.
+function boss_escalate(m, b)
+  local phase = (m.hp <= m.hp0 / 3) and 2 or ((m.hp <= m.hp0 * 2 / 3) and 1 or 0)
+  if phase <= m.phase then return end
+  m.phase = phase
+  m.dmg = m.dmg + 2
+  say(b.n, phase == 1 and "I MUST ESCALATE THIS" or "A PERFORMANCE ISSUE")
+  sfx_safe("boss_warn")
+  local made = 0
+  for _, d in pairs(DIRS) do
+    if made < 2 then
+      local nx, ny = m.x + d[1], m.y + d[2]
+      if node_free(node, nx, ny) and not mon_at(nx, ny)
+         and not (nx == hero.tx and ny == hero.ty) then
+        add(node.mons, mon_new(mon_roll(depth), nx, ny))
+        made = made + 1
+      end
+    end
+  end
+end
+
+function boss_down(m, b)
+  boss_alive = false
+  score = score + 500 * depth
+  sfx_safe("level_clear")
+  burst(m.x, m.y, 40, { 10, 7, 14, 8 })
+  -- the reward is a rated piece, so it goes through the same slot rules as
+  -- anything else and is refused if you already carry better
+  local drop = boss_prize(depth)
+  if drop then add(node.items, item_new(drop, m.x, m.y)) end
+  say("the way down", "THE STAIRS ARE OPEN")
+end
+
+-- The best weapon the dungeon has, or a draught if that slot is already full.
+function boss_prize(d)
+  local best, bv = nil, wpnv
+  for i = 1, #ITEMS do
+    local it = ITEMS[i]
+    if it.k == "wpn" and it.v > bv then best, bv = i, it.v end
+  end
+  if best then return best end
+  for i = 1, #ITEMS do
+    if ITEMS[i].k == "heal" and ITEMS[i].v > 10 then return i end
+  end
+  return nil
+end
+
 -- The deepest thing the book has, worked out rather than written down twice.
 MON_DMAX = 0
 for i = 1, #BESTIARY do MON_DMAX = max(MON_DMAX, BESTIARY[i].d) end
@@ -1086,28 +1405,73 @@ function mon_roll(d)
   local pool = {}
   for i = 1, #BESTIARY do
     local b = BESTIARY[i]
-    if b.d <= top and b.d >= top - 4 and not (b.boss and d < 9) then add(pool, i) end
+    -- bosses are never rolled: they are placed, on their own floor, by
+    -- boss_place. One wandering into an ordinary room as a random encounter
+    -- was the old behaviour and it is not a boss fight, it is an ambush by
+    -- something with forty health.
+    if b.d <= top and b.d >= top - 4 and not b.boss then add(pool, i) end
   end
   if #pool == 0 then return 1 end
   return pick(pool)
 end
 
+-- Health and damage scale apart, and the split is the whole difficulty curve.
+--
+-- They used to share one factor, so both grew 2.7x by depth 13 while the hero
+-- capped at 7 damage and 7 armour. Armour is a *flat* subtraction, so as
+-- monster damage grew it removed a smaller and smaller share of it -- at depth
+-- 1 it cancelled a rat outright, at depth 13 it took 39% off the manager. The
+-- two curves crossed at depth 9, past which the game was unwinnable in a
+-- straight fight even in the best kit the dungeon can produce.
+--
+-- Health keeps growing; damage stops at DMG_CAP_D. Deep floors are therefore
+-- long rather than lethal, which is the honest version of what "deeper" is
+-- supposed to feel like -- and because max health keeps rising with depth
+-- while incoming damage does not, the hits you can survive now grow faster
+-- than the hits you need to land, so the curve converges instead of diverging.
+DMG_CAP_D = 8
+
 function mon_new(bi, x, y)
   local b = BESTIARY[bi]
-  local scale = 1 + (depth - 1) * 0.14
+  local hscale = 1 + (depth - 1) * 0.14
+  local dscale = 1 + (min(depth, DMG_CAP_D) - 1) * 0.14
+  local hp0 = flr(b.hp * hscale)
   return {
     bi = bi, x = x, y = y, px = x, py = y, anim = 0,
-    hp = flr(b.hp * scale), dmg = flr(b.dmg * scale), said = false, slow = 0,
+    hp = hp0, hp0 = hp0, dmg = flr(b.dmg * dscale), said = false, slow = 0,
   }
 end
 
 function mon_draw(m)
   local b = BESTIARY[m.bi]
   local l = clamp(cell_light(m.x, m.y), 0, 3)
-  plan_draw(b.plan,
-            flr(vx(0) + m.px * TS) + 3, flr(vy(0) + m.py * TS) + 3,
+  local x, y = flr(vx(0) + m.px * TS) + 3, flr(vy(0) + m.py * TS) + 3
+  plan_draw(b.plan, x, y,
             RAMPS[b.ramp][l + 1], RAMPS[b.ramp][min(l + 2, 4)],
             RAMPS.cold[l + 1], m.x)
+  if m.boss then boss_dress(m, x, y, l) end
+end
+
+-- A boss occupies one tile like anything else -- the grid is the grid -- but
+-- it is built out past it, because height and overhang are free at this camera
+-- and a boss that reads as one more biped is not a boss. A mantle wider than
+-- any plan draws, a crown in fixed gold that the light map never touches, and
+-- a ring of embers on the floor it stands on so you can see it from the door.
+function boss_dress(m, x, y, l)
+  local c = RAMPS.blood[max(l, 1) + 1]
+  boxfill(x - 5, y - 2, 45, x + 5, y + 2, 47, c)             -- mantle
+  boxfill(x - 5, y + 2, 45, x + 5, y + 2, 45, RAMPS.blood[3])
+  boxfill(x - 2, y - 1, 37, x + 2, y + 1, 38, 10)            -- crown
+  vset(x - 3, y, 36, 10)
+  vset(x + 3, y, 36, 10)
+  vset(x, y, 35, 10)
+  -- embers, and they beat faster once it starts escalating
+  local sp = 0.01 + m.phase * 0.006
+  for i = 0, 5 do
+    local a = frame * sp + i / 6
+    vset(flr(x + cos(a) * 7), flr(y - sin(a) * 5), FLOOR_Z - 1,
+         m.wind == 1 and 8 or 9)
+  end
 end
 
 -- Body plans are built from parts rather than a box and a lid: silhouette
@@ -1401,6 +1765,40 @@ function burst(tx, ty, n, cols)
   end
 end
 
+-- Damage prints in the world, over the thing that took it, and it is exact
+-- rather than guessed. The cart is never told where the camera is, so a number
+-- placed "near the monster on screen" would be arithmetic on a projection it
+-- cannot do -- the reason §5.4 put barks in a fixed banner. But `print` draws
+-- on a y-slice, so setting the slice to the target's own y and printing at its
+-- x puts the glyphs in the world at exactly the right place, for free, with no
+-- projection at all. It rises by drifting up the z axis as its life runs out.
+DMGNUM_T = 15
+
+function dmgnum(tx, ty, amount)
+  if not FX_DMGNUM then return end
+  add(dmgnums, {
+    x = vx(tx) + 3 - (amount > 9 and 4 or 2), y = vy(ty) + 3,
+    n = amount, life = DMGNUM_T,
+  })
+end
+
+function dmgnums_update()
+  for i = #dmgnums, 1, -1 do
+    local d = dmgnums[i]
+    d.life = d.life - 1
+    if d.life <= 0 then deli(dmgnums, i) end
+  end
+end
+
+function dmgnums_draw()
+  for d in all(dmgnums) do
+    set_draw_slice(d.y)
+    -- warm while it is fresh, fading through the ramp as it climbs
+    local c = d.life > 10 and 7 or (d.life > 5 and 10 or 9)
+    print(d.n, d.x, 42 - flr((DMGNUM_T - d.life) / 3), c)
+  end
+end
+
 function parts_update()
   for i = #parts, 1, -1 do
     local p = parts[i]
@@ -1472,7 +1870,16 @@ function try_move(dir)
     return
   end
   if t == T_STAIR then
-    descend()
+    -- On a boss floor the stairs are the reward for the fight, not a way past
+    -- it. Refusing costs a turn like any other bump, so standing on them
+    -- hoping is not free while something is walking toward you.
+    if boss_alive then
+      say("the way down", "SOMETHING STILL OWNS THIS")
+      sfx_safe("deny_error")
+      end_turn()
+    else
+      descend()
+    end
     return
   end
   if t == T_WALL then return end
@@ -1629,6 +2036,18 @@ end
 
 function mon_attack(m, b)
   m.angry = true
+  -- The boss telegraphs. It winds up on one turn and lands on the next, which
+  -- gives back a turn you may actually spend -- retreat, drink, cast, or trade
+  -- -- and halves the incoming damage without making it less frightening. The
+  -- tell is a bark, so it uses a channel the player is already reading.
+  if m.boss then
+    m.wind = 1 - m.wind
+    if m.wind == 1 then
+      say(b.n, "IT RAISES BOTH ARMS")
+      sfx_safe("boss_warn")
+      return
+    end
+  end
   local hit = max(1, m.dmg - arm)
   -- The sigh is a timed debuff, not a tax. It used to take a permanent point
   -- of damage every turn it stood next to you, and since base damage is 2 with
@@ -1646,7 +2065,7 @@ function mon_attack(m, b)
     say(b.n, "THAT WILL BE " .. take .. " GOLD")
     return
   end
-  if b.drain and arm > 0 then
+  if (b.drain or m.boss) and arm > 0 then
     -- damages the best piece by a point rather than shaving a counter, so the
     -- repair path is the same as the acquisition path: find another of that
     -- kind and it replaces the damaged one
@@ -1672,15 +2091,22 @@ function mon_hurt(i, amount)
   local n = node
   local m = n.mons[i]
   local b = BESTIARY[m.bi]
+  -- A boss wears armour of its own, and it subtracts from your roll exactly as
+  -- yours subtracts from its -- the same one-line rule, pointed the other way.
+  if m.arm then amount = max(1, amount - m.arm) end
   m.hp = m.hp - amount
   m.angry = true
+  dmgnum(m.x, m.y, amount)
   sfx_safe("sword_hit")
   burst(m.x, m.y, 6, { 8, 14, 7 })
+  if m.hp > 0 and m.boss then boss_escalate(m, b) end
   if m.hp <= 0 then
     burst(m.x, m.y, 14, { 8, 9, 7 })
     sfx_safe("enemy_explode")
+    decal(m.x, m.y, b.ramp)
     kills = kills + 1
     score = score + 10 + depth * 5
+    if m.boss then boss_down(m, b) end
     if b.drops then add(n.items, item_new(6, m.x, m.y)) end
     -- Children are flagged with their own field, not by scribbling on px:
     -- px is animation state and anim_lerp overwrites it on the next frame,
@@ -1729,6 +2155,8 @@ function enter(i, from_dir)
   node.seen = true
   hero_place(from_dir)
   parts = {}
+  dmgnums = {}
+  dissolve = FX_DISSOLVE and DISSOLVE_T or 0
   pending = nil
   light_alloc()
   light_build()
@@ -1767,6 +2195,13 @@ end
 -- cleanly and sits at the angle its plane is seen at. See the note beside
 -- HUD_Y for why the alternative was rejected, and for the two planes.
 function hrow(i) return HUD_TOP + i * HUD_ROW end
+
+-- The boss in the node you are standing in, if any. `boss_alive` is a
+-- floor-wide fact; this is the one on screen.
+function boss_mon()
+  for m in all(node.mons) do if m.boss then return m end end
+  return nil
+end
 
 function hud_draw()
   -- ---- the near slice, in front of the room: health and armour ----------
@@ -1809,8 +2244,21 @@ function hud_draw()
          torchfuel > 80 and 9 or 8)
   end
 
+  -- A boss gets a bar of its own on the row the spell line normally has to
+  -- itself, and the spell moves right to share it. You need both during the
+  -- one fight in the game where knowing what you can cast decides it.
+  local bm = boss_mon()
+  if bm then
+    local w = flr(bm.hp / bm.hp0 * 60)
+    line(0, hrow(1) + 2, 60, hrow(1) + 2, 5)
+    if w > 0 then
+      line(0, hrow(1) + 2, w, hrow(1) + 2, bm.phase >= 2 and 8 or 14)
+    end
+  end
   if #spells > 0 then
-    print("z-" .. SPELLINFO[spells[1]].n, 0, hrow(1), SPELLINFO[spells[1]].c)
+    local sx = bm and 68 or 0
+    local sn = SPELLINFO[spells[1]].n
+    print("z-" .. sub(sn, 1, bm and 5 or 22), sx, hrow(1), SPELLINFO[spells[1]].c)
   end
 
   if pending then
@@ -1839,7 +2287,8 @@ function minimap()
       local x = bx + flr(n.gx * 8)
       local z = bz + flr(n.gy * 6)
       local w = n.kind == "corr" and 2 or 5
-      local c = (i == node_idx) and 10 or (i == stair_node and 11 or 5)
+      local c = (i == node_idx) and 10
+                or (i == stair_node and (boss_alive and 8 or 11) or 5)
       line(x, z, x + w, z, c)
       line(x, z + 4, x + w, z + 4, c)
       line(x, z, x, z + 4, c)
@@ -1877,6 +2326,9 @@ function new_game()
   fade = 0
   rept = 0
   parts = {}
+  dmgnums = {}
+  dissolve = 0
+  boss_alive = false
   bark_t = 0
   killer = nil
   pending = nil
@@ -1908,6 +2360,7 @@ function _update()
   if shake > 0 then shake = shake - 1 end
   if fade > 0 then fade = fade - 1 end
   if bark_t > 0 then bark_t = bark_t - 1 end
+  if dissolve > 0 then dissolve = dissolve - 1 end
 
   -- flicker: the light map is rebuilt on a step, never per frame
   if frame % 4 == 0 then
@@ -1916,6 +2369,7 @@ function _update()
   end
 
   parts_update()
+  dmgnums_update()
   if hero.anim > 0 then hero.anim = hero.anim - 1 end
   for m in all(node.mons) do if m.anim > 0 then m.anim = m.anim - 1 end end
   anim_lerp()
@@ -2009,6 +2463,7 @@ function _draw()
   for m in all(node.mons) do mon_draw(m) end
   if mode ~= "over" then hero_draw() end
   parts_draw()
+  dmgnums_draw()
 
   if sx > 0 then
     -- a cheap flash on the near sill sells the impact without a camera

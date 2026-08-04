@@ -272,6 +272,11 @@ function probe_worst()
   end
   for i = 1, 6 do add(node.items, item_new(item_roll(9), 1 + i, 2)) end
   burst(hero.tx, hero.ty, 80, { 8, 9, 10, 7 })
+  -- The worst case is a *settled* room. enter() starts the dissolve, and a
+  -- frame drawn mid-dissolve withholds most of the room -- which quietly
+  -- reported 251 calls for a frame that actually costs 700, i.e. the budget
+  -- check measuring a transition and calling it the ceiling.
+  dissolve = 0
   trace_flush()
   frame = frame + 1
   _draw()

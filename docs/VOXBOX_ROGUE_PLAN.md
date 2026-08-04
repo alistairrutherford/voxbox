@@ -385,6 +385,71 @@ silence — which is the argument for the harness printing rosters rather than
 someone playing far enough down to notice. Anchoring the window to
 `min(d, MON_DMAX)` holds the last roster for however deep a run goes.
 
+**Health and damage scale apart, and the split is the whole difficulty curve.**
+They shared one factor at first, so both grew 2.7x by depth 13 while the hero
+capped at 7 damage and 7 armour. Armour is a *flat* subtraction, so as monster
+damage grew it removed a smaller and smaller share of it — at depth 1 it
+cancelled a rat outright, at depth 13 it took 39% off the boss. The two curves
+crossed at **depth 9**, past which the game was unwinnable in a straight fight
+even in the best kit the dungeon can produce, and the descent probe reaches
+depth 13 in twelve attempts out of twelve. Nothing said so; it simply stopped
+being possible.
+
+Health now keeps scaling and damage stops at `DMG_CAP_D = 8`. Deep floors are
+long rather than lethal, and because max health keeps rising with depth while
+incoming damage does not, the hits you can survive grow *faster* than the hits
+you need to land — so the curve converges instead of diverging:
+
+| depth | 1 | 5 | 7 | 9 | 13 | 17 | 21 | 25 |
+|---|---|---|---|---|---|---|---|---|
+| hits needed | 1 | 5 | 6 | 6 | 8 | 10 | 11 | 13 |
+| hits survived | 16 | 12 | 7 | 8 | 10 | 12 | 14 | 16 |
+
+That is the toughest monster each floor can roll, against the best kit the
+dungeon offers. It was `LOSE` from depth 9 down before the split.
+
+### 3.4 Boss floors
+
+**Every tenth floor is held by a boss, and the stairs do not work until it is
+dead.** That gives a run a shape it did not have — the only way one used to end
+was dying — and it puts a wall across the depth curve at a place the numbers
+can be tuned for, instead of letting descent run to depth 30 where nothing was
+ever balanced. The boss is placed in the stair node, so it stands between you
+and the way down by construction rather than by a rule enforced elsewhere.
+
+The fight is built from pieces that already exist. Nothing here needs a new
+verb — you bump it, exactly as you bump everything:
+
+| piece | what it does |
+|---|---|
+| **armour** | the boss wears its own, subtracting from your damage roll the way yours subtracts from its. Bare-handed you do the floored minimum of 1; the weapon slot is what makes it winnable, so progression *is* the mechanic |
+| **health** | its damage is heavy against a full set of armour, but it only lands every other turn — it telegraphs, and the wind-up is a real turn you may spend retreating, drinking, casting or trading |
+| **drain** | every landed strike takes a point off your best piece, so the fight erodes the thing keeping you alive. Spare pieces and the tidy-kit shrine are the counter-play (§4.2) |
+| **escalate** | at each third of its health it calls two monsters from the floor's own roster and gains damage. It never introduces something you have not already met on the way down |
+
+Its stats are **not** multipliers on a bestiary row — a multiplier on top of the
+depth curve compounds into nonsense, and the first attempt gave the depth-10
+boss 198 health and 26 damage: a forty-turn fight that killed a full-health
+hero in two. They are stated as what the fight should *be* — this many landed
+hits long, costing this share of a health bar — and the numbers fall out of
+that and the game's own constants, so they stay correct if the weapon or
+armour cap ever moves.
+
+Tuned against a simulation running the real combat code, because the closed
+form was wrong twice: escalation and the armour drain interact, and by the
+seventh landed strike there is no armour left to subtract, which no static
+estimate caught. What it settled at:
+
+| depth | boss | full kit + 1 draught | full kit, no draught | bare-handed |
+|---|---|---|---|---|
+| 10 | 75hp arm2 dmg7 | **win**, 10/34 left, 15 turns | dead on turn 14 | dead |
+| 20 | 60hp arm3 dmg9 | **win**, 17/54 left, 15 turns | win, 3/54 left | dead |
+| 30 | 45hp arm4 dmg11 | **win**, 23/74 left, 15 turns | win, 9/74 left | dead |
+
+A gear check with a resource cost, consistent across tiers. `tools/deeper_items.py`
+runs that simulation every time, so a change to armour, weapons or the damage
+curve cannot quietly make the boss trivial or impossible.
+
 ### 3.3 Save is a seed, not a map
 
 Because `rnd` is a deterministic Park-Miller PRNG seeded by `srand`, **the
@@ -712,22 +777,64 @@ persists visibly while the spell is active.
 Everything here is achievable with the primitives that exist. Ticked off as
 each phase lands.
 
+**Every one that has landed is a named flag under `config.fx` in the manifest**
+(§10), because a look is a judgement and a judgement wants to be revisable
+without a code edit — which is how `textures` came to be off. They default on;
+turn one off to see what it was doing.
+
 - Drop shadows under hero and monsters — free from the engine
 - Torch flames: 6–8 animated voxels per torch, warm ramp, 3-frame cycle
 - Torch smoke: dark particles rising and fading
 - Light map with warm pools, cold stone, and flicker (§2)
 - Dithered ghosts and dithered spell shields (§5.2)
 - Screen shake by world offset
-- Room transition: **dissolve** — the old room's voxels erased in a
-  deterministic pseudo-random order over 8 frames, the new room built up the
-  same way
+- **`wall_floor`** — walls never fall below light level 1. Index 1 of every
+  ramp is the same navy, so an unlit wall and the unlit floor in front of it
+  were *literally the same colour*: outside the torch pools the room had no
+  shape at all, and only the capping course gave an edge away, one voxel of it.
+  One clamp, and the dark is legible without lighting what stands in it
+- **`jitter`** — light pools get ragged edges instead of compass-drawn arcs, by
+  perturbing the squared *distance* per cell rather than the level. Dithering
+  the boundary is the textbook answer and is wrong here: a checkerboard has no
+  runs, so it would wreck the two RLE passes that make the light map
+  affordable. Perturbing the distance moves *where* a band falls, so interiors
+  stay solid and the run count grows only along the boundary. Measured at
+  3.16 ms against 3.4 ms before it — no cost at all. The offsets scale with the
+  pool's radius, so the outer edge moves about a voxel at any size; the inner
+  bands move more, which reads as the flame guttering
+- **`theme_torches`** — each depth's pools use their own ramp. All five themes
+  named the same orange before, so only the unlit stone ever changed and half
+  the point of two ramps per theme was switched off by one repeated field
+- **`arches`** — a lintel over each far-wall doorway. A doorway is a gap, and
+  from across a dark room a gap looks like nothing, so a node's exits were
+  invisible until you stood on them. Far walls only: a near wall is a
+  four-voxel sill with nothing above it to arch (§1.2)
+- **`hero_crest`** — two voxels of pink on the hero's head, in a fixed colour
+  the light map never touches. Everything else about him is drawn from the same
+  ramps as a statue, so an armoured hero beside a monument read as a second
+  monument, and in an unlit corner he vanished. The trick the monsters' eyes
+  already use
+- **`dissolve`** — rooms assemble over 8 frames on entry, in an arithmetic hash
+  order rather than `rnd()` so the dungeon's PRNG stream is untouched. The
+  engine offers only a hard cut, but the cart draws every voxel itself, so it
+  can simply withhold most of them for a few frames
 - Destructible props: crates, barrels and pots burst into particles that
   inherit the prop's ramp
-- Animated liquid tiles: water and lava cycle their ramp along a sine, so the
-  surface visibly moves
-- Blood and scorch decals painted into the floor's colour map, persisting for
-  the room's lifetime
-- Floating damage numbers, `print` on a near slice
+- **`liquid`** — water cycles its ramp along a travelling sine. Drawn *over*
+  the floor's cached runs rather than inside them: the runs are rebuilt only
+  when a light level changes, and animating them per frame would throw away
+  exactly the saving that makes the light map affordable. A puddle is a dozen
+  tiles, so overdrawing costs a dozen boxfills and leaves the cache alone
+- **`decals`** — blood and scorch stay where they were made for the life of the
+  floor, so a room you have fought in looks different from one you have not.
+  They light like everything else, so a stain in an unlit corner is navy and
+  invisible — the rule the capping course had to learn
+- **`damage_numbers`** — and they are *exact*, not guessed. The cart is never
+  told where the camera is, so a number placed "near the monster on screen"
+  would be arithmetic on a projection it cannot do — the reason §5.4 put barks
+  in a fixed banner. But `print` draws on a y-slice, so setting the slice to
+  the target's own y and printing at its x puts the glyphs in the world at
+  exactly the right place, for free, with no projection at all
 - Stairs down: a slow whirlpool of particles descending into the floor
 - Title parade: six real monsters, one of every body plan, walking a ring on
   the demo slab. Drawn by the same `plan_draw` the dungeon uses — which is why
@@ -824,13 +931,24 @@ light rebuild is 3.4 ms amortised over four frames.
 | Particles (`vset`) | 78 |
 | HUD, minimap, barks | 20 |
 
-Turning stone texture off (§2.1b) has moved that table since: the worst case is
-now **661 draw calls**, because runs the mottling was breaking up merge again.
-Against a budget that was never the binding constraint this is noise, and it is
-recorded only because the harness prints the number and an unexplained change
-in it should be a question. Note what it also says about the rejected HUD
-levelling in §5.4 — nine calls a line instead of one would have spent a third
-of that saving on making the text worse.
+That table has moved twice since. Turning stone texture off (§2.1b) took the
+worst case to **661**, because runs the mottling was breaking up merge again;
+the §7 effects have since taken it to **798 draw calls, 5.26 ms of `_draw`**,
+with the light rebuild still at **3.16 ms** — the jitter costs nothing
+measurable. Against a budget that was never the binding constraint this is
+noise, and it is recorded only because the harness prints the number and an
+unexplained change in it should be a question. Note what it also says about the
+rejected HUD levelling in §5.4 — nine calls a line instead of one would have
+spent a third of that saving on making the text worse.
+
+**The budget probe measured the wrong frame for one commit and said 251.**
+`dissolve` (§7) withholds most of a room for eight frames after `enter()`, and
+`probe_worst` drew its frame immediately after entering — so the ceiling check
+was measuring a transition. It now clears `dissolve` first. A performance
+number that improves by two thirds for no reason is not good news, it is a
+broken instrument, and this is the second time in this project that a
+suspiciously good measurement turned out to be one (§4.2's armour counter was
+the first).
 
 ### 11.1 The harnesses
 
