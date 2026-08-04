@@ -1005,19 +1005,27 @@ end
 
 function mon_draw(m)
   local b = BESTIARY[m.bi]
-  local x = flr(vx(0) + m.px * TS) + 3
-  local y = flr(vy(0) + m.py * TS) + 3
   local l = clamp(cell_light(m.x, m.y), 0, 3)
-  local c = RAMPS[b.ramp][l + 1]
-  local hi = RAMPS[b.ramp][min(l + 2, 4)]
-  local bob = flr(frame / 4 + m.x) % 2
+  plan_draw(b.plan,
+            flr(vx(0) + m.px * TS) + 3, flr(vy(0) + m.py * TS) + 3,
+            RAMPS[b.ramp][l + 1], RAMPS[b.ramp][min(l + 2, 4)],
+            RAMPS.cold[l + 1], m.x)
+end
 
-  -- Body plans are built from parts rather than a box and a lid: silhouette
-  -- first (legs, torso, shoulders, head), then the bits that give a species
-  -- away (horns, snouts, tails), then eyes on the +y face where the camera can
-  -- see them. Height is free -- z is not constrained by the tile grid the way
-  -- width is -- so detail goes upward.
-  if b.plan == "biped" then
+-- Body plans are built from parts rather than a box and a lid: silhouette
+-- first (legs, torso, shoulders, head), then the bits that give a species
+-- away (horns, snouts, tails), then eyes on the +y face where the camera can
+-- see them. Height is free -- z is not constrained by the tile grid the way
+-- width is -- so detail goes upward.
+--
+-- Position and colour come in rather than being looked up from a monster,
+-- because the title screen draws the same plans on the demo slab (§13) where
+-- there is no tile grid, no node and no light map to look anything up in.
+-- `ph` is whatever the caller wants the bob and the swarm's orbit keyed to, so
+-- that two monsters standing side by side do not breathe in unison.
+function plan_draw(plan, x, y, c, hi, trim, ph)
+  local bob = flr(frame / 4 + ph) % 2
+  if plan == "biped" then
     boxfill(x - 2, y - 1, 55, x - 1, y + 1, 57, c)          -- legs
     boxfill(x + 1, y - 1, 55, x + 2, y + 1, 57, c)
     boxfill(x - 2, y - 2, 51, x + 2, y + 2, 54, c)          -- torso
@@ -1027,10 +1035,10 @@ function mon_draw(m)
     boxfill(x - 2, y - 2, 47, x + 2, y + 2, 50, hi)         -- head
     boxfill(x - 2, y - 1, 45, x - 2, y + 1, 46, c)          -- horns
     boxfill(x + 2, y - 1, 45, x + 2, y + 1, 46, c)
-    boxfill(x - 2, y + 2, 53, x + 2, y + 2, 53, RAMPS.cold[l + 1])  -- belt
+    boxfill(x - 2, y + 2, 53, x + 2, y + 2, 53, trim)                     -- belt
     vset(x - 1, y + 2, 48, 8)                               -- eyes, near face
     vset(x + 1, y + 2, 48, 8)
-  elseif b.plan == "quad" then
+  elseif plan == "quad" then
     boxfill(x - 2, y - 2, 52, x + 2, y + 1, 55, c)          -- barrel
     boxfill(x - 2, y - 2, 56, x - 2, y - 1, 57, c)          -- legs
     boxfill(x + 2, y - 2, 56, x + 2, y - 1, 57, c)
@@ -1043,7 +1051,7 @@ function mon_draw(m)
     boxfill(x - 1, y - 3, 51, x + 1, y - 2, 52, c)          -- tail
     vset(x - 1, y + 4, 51, 8)
     vset(x + 1, y + 4, 51, 8)
-  elseif b.plan == "blob" then
+  elseif plan == "blob" then
     sphere(x, y, 54 + bob, 4, c)
     sphere(x, y - 1, 53 + bob, 2, hi)                       -- a lighter core
     boxfill(x - 3, y - 1, 57, x + 3, y + 1, 57, c)          -- it spreads
@@ -1051,9 +1059,9 @@ function mon_draw(m)
     vset(x + 2, y + 3, 52 + bob, 7)
     vset(x - 2, y + 3, 53 + bob, 0)
     vset(x + 2, y + 3, 53 + bob, 0)
-  elseif b.plan == "swarm" then
+  elseif plan == "swarm" then
     for i = 0, 5 do
-      local a2 = frame * 0.03 + i / 6 + m.x
+      local a2 = frame * 0.03 + i / 6 + ph
       local sx = flr(x + cos(a2) * 4)
       local sy = flr(y - sin(a2) * 3)
       local sz = 49 + (i % 4) * 2
@@ -1061,7 +1069,7 @@ function mon_draw(m)
       vset(sx - 1, sy + 1, sz, hi)                          -- wings
       vset(sx + 1, sy + 1, sz, hi)
     end
-  elseif b.plan == "tall" then
+  elseif plan == "tall" then
     boxfill(x - 2, y - 1, 53, x - 1, y + 1, 57, c)          -- legs
     boxfill(x + 1, y - 1, 53, x + 2, y + 1, 57, c)
     boxfill(x - 3, y - 2, 47, x + 3, y + 2, 52, c)          -- slab of a torso
@@ -1886,6 +1894,50 @@ function death_draw()
   if modet > 90 and frame % 40 < 26 then banner(l[4], hrow(3), 10, x) end
 end
 
+-- The parade: real monsters walking the demo slab, one of every body plan, in
+-- place of the six orbiting dots that were there before. They are drawn by the
+-- same plan_draw the dungeon uses, so this is the bestiary rather than a
+-- picture of it, and they cast the engine's drop shadows onto the slab for
+-- nothing.
+--
+-- Cast by name rather than by index, so reordering BESTIARY cannot silently
+-- swap the line-up; unknown names are dropped rather than crashing the title
+-- screen. Chosen for one of each plan and for ramps that read against a warm
+-- slab -- a `warm` monster on the orange rings would be invisible.
+PARADE = { "lich clerk", "hound", "sorry slime", "bat cloud",
+           "minor poet", "cave troll" }
+
+-- The ring is a flat ellipse across the *front* of the slab, and where it sits
+-- is measured rather than chosen. The tallest plan stands 17 voxels, and any
+-- further back than y = 45 the cave troll's horns rise into the last line of
+-- the title text -- which it would occlude, being the nearer of the two. A lap
+-- was walked frame by frame against the projected text band to find that:
+-- y = 45..87 keeps every plan clear of it by 19 px and on the slab, and being
+-- near the camera is also what makes them big enough to recognise.
+PARADE_CY, PARADE_RY = 66, 21
+PARADE_CX, PARADE_RX = 64, 48
+
+function parade_draw()
+  for i = 1, #PARADE do
+    local bi = nil
+    for j = 1, #BESTIARY do if BESTIARY[j].n == PARADE[i] then bi = j end end
+    if bi then
+      local b = BESTIARY[bi]
+      local a = frame * 0.0015 + (i - 1) / #PARADE
+      -- Lit as if a torch stood in the middle of the slab: a step brighter at
+      -- the front of the ring than at the back, so they are not flat cut-outs.
+      -- Levels 2 and 1 rather than 3 and 2, because level 3 is the top of
+      -- every ramp and four of the six then come out the same white.
+      local l = sin(a) < 0 and 2 or 1
+      plan_draw(b.plan,
+                flr(PARADE_CX + cos(a) * PARADE_RX),
+                flr(PARADE_CY - sin(a) * PARADE_RY),
+                RAMPS[b.ramp][l + 1], RAMPS[b.ramp][min(l + 2, 4)],
+                RAMPS.cold[l + 1], i * 7)
+    end
+  end
+end
+
 function title_draw()
   -- The demo floor matches the play area's footprint, not a square: at this
   -- camera a square slab runs off the bottom of the frame and swallows the
@@ -1899,10 +1951,7 @@ function title_draw()
     boxfill(max(OX, 64 - rx), max(OY, 46 - ry), FLOOR_Z,
             min(xmax, 64 + rx), min(ymax, 46 + ry), FLOOR_Z, RAMPS.warm[5 - i])
   end
-  for i = 0, 5 do
-    local a = frame * 0.01 + i / 6
-    vset(flr(64 + cos(a) * 44), flr(46 - sin(a) * 30), FLOOR_Z - 1, 9)
-  end
+  parade_draw()
   set_draw_slice(HUD_Y)
   -- Seven rows rather than the HUD's four, at a tighter pitch and starting a
   -- voxel higher: there is no wall here, only the demo slab, so the band runs

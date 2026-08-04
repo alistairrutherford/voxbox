@@ -642,6 +642,13 @@ each phase lands.
   the room's lifetime
 - Floating damage numbers, `print` on a near slice
 - Stairs down: a slow whirlpool of particles descending into the floor
+- Title parade: six real monsters, one of every body plan, walking a ring on
+  the demo slab. Drawn by the same `plan_draw` the dungeon uses — which is why
+  that function takes a position and colours rather than a monster, since the
+  title screen has no tile grid, no node and no light map to look them up in.
+  It costs a fixed ring position, a lighting level and nothing else, and the
+  engine's drop shadows come free. Cast by *name*, so reordering the bestiary
+  cannot silently change the line-up
 - Chest opening: lid rotates via three `boxfill`s over 5 frames, contents rise
 - Wall damage from the Cave Troll: tiles removed from the room grid, changing
   both the geometry and the light map
