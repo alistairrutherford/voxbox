@@ -102,7 +102,10 @@ function probe_curve(depths)
     local worst = 0
     for i = 1, #BESTIARY do
       local b = BESTIARY[i]
-      if b.d <= d and b.d >= d - 4 and not (b.boss and d < 9) then
+      -- must match mon_roll: bosses are placed, never rolled, so including
+      -- one here would report a curve against a monster you cannot meet
+      local top = min(d, MON_DMAX)
+      if b.d <= top and b.d >= top - 4 and not b.boss then
         worst = max(worst, flr(b.hp * (1 + (d - 1) * 0.14)))
       end
     end
@@ -121,6 +124,282 @@ print(f"after 8 floors, taking every weapon found: wpn = {int(wpnv)}/"
 depths = lua.table_from([1, 3, 5, 7, 9, 11, 13])
 print("hits to kill the toughest monster on a floor:")
 print("  " + lua.globals().vb_call("probe_curve", depths))
+
+
+
+# The new menagerie. Every one of these is a rule rather than a stat line, and
+# a rule that silently does nothing looks exactly like a rule that works.
+lua.globals().vb_load(r"""
+function mob_find(nm)
+  for i = 1, #BESTIARY do if BESTIARY[i].n == nm then return i end end
+  return 0
+end
+function mob_solo(nm, dx, dy)
+  mode = "play" new_game()
+  node.mons = {} node.items = {}
+  hp, hpmax, arm = 200, 200, 0
+  local bi = mob_find(nm)
+  local m = mon_new(bi, hero.tx + (dx or 1), hero.ty + (dy or 0))
+  add(node.mons, m)
+  return m, BESTIARY[bi]
+end
+
+function probe_mobs()
+  local out = ""
+
+  -- tomb beetle: its own armour, so the weapon slot is what beats it
+  local m = mob_solo("tomb beetle")
+  wpnv = 0 wpn_sync()
+  local h = m.hp mon_hurt(1, dmg + 1) local bare = h - m.hp
+  wpnv = 4 wpn_sync()
+  h = m.hp mon_hurt(1, dmg + 1)
+  out = out .. "beetle arm " .. m.arm .. ": fists " .. bare ..
+        ", blade " .. (h - m.hp) .. (bare < h - m.hp and "" or "  BROKEN") .. "\n"
+
+  -- chandelier rat: takes gold, deals nothing, runs
+  local b
+  m, b = mob_solo("chandelier rat")
+  gold = 100 mon_attack(m, b)
+  out = out .. "rat: gold 100->" .. gold .. " hp intact " .. tostr(hp == 200) ..
+        " fleeing " .. tostr(m.fleeing == true) .. "\n"
+
+  -- auditor: takes the best rating it can see, weapon included
+  m, b = mob_solo("the auditor")
+  armv = { helm = 2, chest = 3, shield = 2 } arm_sync()
+  wpnv = 4 wpn_sync()
+  mon_attack(m, b) mon_attack(m, b)
+  out = out .. "auditor: wpn 4 arm 7 -> wpn " .. wpnv .. " arm " .. arm .. "\n"
+
+  -- echo: repeats your last spell back at you
+  m, b = mob_solo("the echo")
+  last_spell = "fireball"
+  h = hp
+  for i = 1, 12 do mon_attack(m, b) end
+  out = out .. "echo: 12 attacks cost " .. (h - hp) .. " hp\n"
+
+  -- grief: follows anywhere, moves every other turn
+  m, b = mob_solo("grief", 6, 0)
+  local moves = 0
+  for t = 1, 10 do
+    local x0 = m.x turns = t mons_turn()
+    if m.x ~= x0 then moves = moves + 1 end
+  end
+  out = out .. "grief: moved on " .. moves .. "/10 turns, follows " ..
+        tostr(b.follows == true) .. "\n"
+
+  -- understudy: the only weapon drop that is not the boss or the loot table
+  m, b = mob_solo("the understudy")
+  depth = 6 mon_hurt(1, 999)
+  local got = "nothing"
+  for it in all(node.items) do got = ITEMS[it.ii].n end
+  out = out .. "understudy dropped: " .. got .. "\n"
+
+  -- centipede: a train, and a bump on the tail hurts the whole animal
+  m, b = mob_solo("centipede", 5, 0)
+  for t = 1, 4 do mons_turn() end
+  local spread = "head " .. m.x
+  for s in all(m.seg) do spread = spread .. "," .. s.x end
+  local tail = m.seg[#m.seg]
+  hero.tx, hero.ty = tail.x - 1, tail.y
+  h = m.hp hero.face = 2 try_move(2)
+  out = out .. "centipede x: " .. spread .. "  tail bump took " ..
+        (h - m.hp) .. ((h - m.hp) > 0 and "" or "  BROKEN") .. "\n"
+
+  -- mimic: a chest until bumped
+  m, b = mob_solo("mimic")
+  local hidden = not m.angry
+  hero.face = 2 hero.tx, hero.ty = m.x - 1, m.y
+  try_move(2)
+  out = out .. "mimic: disguised " .. tostr(hidden) .. " -> angry " ..
+        tostr(m.angry == true) .. "\n"
+  return out
+end
+
+function probe_crew()
+  mode = "play" new_game()
+  node.mons = {} node.items = {}
+  hp, hpmax, arm = 400, 400, 0
+  local bi = mob_find("the committee")
+  for k = 1, 3 do
+    local c = mon_new(bi, 2 + k, 5) c.crew = 1 add(node.mons, c)
+  end
+  mon_hurt(1, 999)
+  local a = "one down -> " .. crew_alive(1) .. " up"
+  for t = 1, CREW_REVIVE + 1 do crew_turn() end
+  a = a .. ", revived to " .. crew_alive(1)
+  for i = #node.mons, 1, -1 do mon_hurt(i, 999) end
+  a = a .. "; all three in one round -> " .. crew_alive(1) .. " up"
+  crew_turn()
+  return a .. ", " .. #node.mons .. " left"
+end
+
+function probe_sconce()
+  mode = "play" new_game()
+  node.mons = {}
+  hp, hpmax, arm = 200, 200, 0
+  local bi = 0
+  for i = 1, #BESTIARY do if BESTIARY[i].snuff then bi = i end end
+  local lit0 = 0
+  for t in all(node.torch) do if t.lit then lit0 = lit0 + 1 end end
+  local t1 = node.torch[1]
+  local m = mon_new(bi, hero.tx + 2, hero.ty)
+  add(node.mons, m)
+  m.x, m.y = t1.x, t1.y
+  if not node_free(node, m.x, m.y) then
+    for _, d in pairs(DIRS) do
+      if node_free(node, t1.x + d[1], t1.y + d[2]) then
+        m.x, m.y = t1.x + d[1], t1.y + d[2]
+      end
+    end
+  end
+  mons_turn()
+  local lit1 = 0
+  for t in all(node.torch) do if t.lit then lit1 = lit1 + 1 end end
+  local dead = nil
+  for t in all(node.torch) do if not t.lit then dead = t end end
+  if not dead then return "sconces " .. lit0 .. " -> " .. lit1 .. "  NOTHING SNUFFED" end
+  local dir = nil
+  for k = 1, 4 do
+    local fx, fy = dead.x - DIRS[k][1], dead.y - DIRS[k][2]
+    if node_free(node, fx, fy) then
+      hero.tx, hero.ty, hero.px, hero.py = fx, fy, fx, fy
+      dir = k
+    end
+  end
+  node.mons = {}
+  if dir then try_move(dir) end
+  return "sconces " .. lit0 .. " -> " .. lit1 ..
+         ", relit by bumping the wall " .. tostr(dead.lit)
+end
+
+function probe_chests()
+  local n = 0
+  for d = 1, 6 do
+    floor_build(d)
+    for i = 1, #nodes do
+      for p in all(nodes[i].props) do if p.kind == "chest" then n = n + 1 end end
+    end
+  end
+  return n .. " chests over 6 floors"
+end""")
+print(str(lua.globals().vb_call("probe_mobs")).rstrip().replace("\n", "\n         ").rjust(0))
+print("crew     " + str(lua.globals().vb_call("probe_crew")))
+print("sconce   " + str(lua.globals().vb_call("probe_sconce")))
+print("chests   " + str(lua.globals().vb_call("probe_chests")))
+
+
+# The light-driven AI, the douse and the retreat rules. All four were silent
+# failures waiting to happen: a radius of zero still lights one cell, so the
+# douse did nothing while looking as though it worked, and none of it is
+# visible from a screenshot.
+lua.globals().vb_load(r'''
+function goto_dark()
+  local bx, by, bd = hero.tx, hero.ty, -1
+  for y = 1, node.h - 2 do
+    for x = 1, node.w - 2 do
+      if node_free(node, x, y) then
+        local near = 99
+        for t in all(node.torch) do near = min(near, chebyshev(t.x, t.y, x, y)) end
+        if near > bd then bx, by, bd = x, y, near end
+      end
+    end
+  end
+  hero.tx, hero.ty, hero.px, hero.py = bx, by, bx, by
+  return bd
+end
+
+function probe_stealth()
+  mode = "play" new_game()
+  goto_dark()
+  torchlit = true light_build()
+  local a, b = hero_light(), aggro_range()
+  torchlit = false light_build()
+  local c, d = hero_light(), aggro_range()
+  -- an unseen thing in an unlit tile gets the first hit
+  node.mons = {}
+  hp, hpmax, arm = 60, 60, 0
+  local m = mon_new(4, hero.tx + 1, hero.ty)
+  add(node.mons, m)
+  local h = hp mon_attack(m, BESTIARY[m.bi]) local first = h - hp
+  h = hp mon_attack(m, BESTIARY[m.bi]) local second = h - hp
+  return "lit: light " .. a .. " noticed at " .. b ..
+         "   doused: light " .. c .. " noticed at " .. d ..
+         "   ambush " .. first .. " then " .. second ..
+         ((d < b and first > second) and "  ok" or "  BROKEN")
+end
+
+function probe_fuel()
+  mode = "play" new_game()
+  torchfuel = 100 torchlit = false end_turn()
+  local doused = torchfuel
+  torchlit = true end_turn()
+  return "fuel over one turn: doused " .. (100 - doused) ..
+         ", lit " .. (doused - torchfuel)
+end
+
+function probe_follow(runs)
+  local followed, tries = 0, 0
+  for t = 1, runs do
+    new_game()
+    local dir, dd = nil, nil
+    for k = 1, 4 do if node.exits[k] then dir, dd = k, node.door[k] end end
+    if dir then
+      hero.tx, hero.ty = dd.x - DIRS[dir][1], dd.y - DIRS[dir][2]
+      node.mons = {}
+      local m = mon_new(1, hero.tx, hero.ty + 1)
+      if not node_free(node, m.x, m.y) then m.y = hero.ty - 1 end
+      m.angry = true
+      add(node.mons, m)
+      tries = tries + 1
+      local was = node_idx
+      try_move(dir)
+      if node_idx ~= was then
+        for mm in all(node.mons) do if mm == m then followed = followed + 1 end end
+      end
+    end
+  end
+  return followed .. "/" .. tries .. " retreats followed (odds " ..
+         FOLLOW_ODDS .. ")"
+end
+
+function probe_ring()
+  mode = "play" new_game()
+  stones = 4
+  spells = { "fireball", "light" }
+  local r = ring_items()
+  local names = ""
+  for i = 1, #r do names = names .. r[i].n .. ", " end
+  -- a throw that lines up, and one that does not
+  node.mons = {}
+  add(node.mons, mon_new(1, hero.tx + 3, hero.ty))
+  local hit = throw_stone()
+  node.mons = {}
+  add(node.mons, mon_new(1, hero.tx + 3, hero.ty + 2))
+  local miss = throw_stone()
+  return "ring: " .. sub(names, 1, #names - 2) ..
+         "   throw in line " .. tostr(hit) .. ", off line " .. tostr(miss) ..
+         ", stones left " .. stones
+end
+
+function probe_wish()
+  mode = "play" new_game()
+  local si = 0
+  for i = 1, #SHRINES do if SHRINES[i].k == "wish" then si = i end end
+  if si == 0 then return "no wish shrine authored" end
+  local p = { x = 1, y = 1, kind = "shrine", si = si, used = false }
+  gold, hp, hpmax = 10, 5, 40
+  prop_touch(p)
+  local poor = "broke: gold " .. gold .. " hp " .. hp .. " spent " .. tostr(p.used)
+  gold = 500
+  prop_touch(p)
+  return poor .. "   |  rich: gold " .. gold .. " hp " .. hp ..
+         " spent " .. tostr(p.used)
+end''', "mech")
+print("stealth   " + str(lua.globals().vb_call("probe_stealth")))
+print("torch     " + str(lua.globals().vb_call("probe_fuel")))
+print("retreat   " + str(lua.globals().vb_call("probe_follow", 60)))
+print("ring      " + str(lua.globals().vb_call("probe_ring")))
+print("wish well " + str(lua.globals().vb_call("probe_wish")))
 
 
 # The boss fight, simulated with the real combat code -- real telegraph, real

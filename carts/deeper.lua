@@ -101,7 +101,28 @@ REGEN_CALM = 3           -- turns per point once nothing in the node is awake
 HP_START  = 16           -- and what you start a run with
 DIVE_HEAL = 8            -- restored on reaching a new floor
 DIVE_MAX  = 2            -- and permanent max health for getting there
-AGGRO     = 6            -- tiles at which a monster notices you
+-- How far a monster notices you depends on how lit *you* are, which is the
+-- only place the light map touches the rules rather than the picture. It was a
+-- flat six tiles whatever the light, so the cart's one genuinely unique system
+-- was decoration: torchlight decided how the room looked and nothing else.
+--
+-- Carrying a lit torch through a dark room now advertises you from eight tiles
+-- away; douse it and nothing sees you past three. That turns the torch clock
+-- from a countdown into a dial, gives the wall sconces a tactical meaning
+-- beyond being pretty, and makes the dark a tool as well as a threat.
+AGGRO_DARK = 3           -- tiles at which something notices you unlit
+AGGRO_LIT  = 8           -- ...and standing in a torch pool
+AGGRO      = AGGRO_LIT   -- the range `hunted()` uses to pick a regen rate
+AMBUSH     = 2           -- extra damage from something you never saw coming
+
+-- Retreating through a door used to be a total escape: nothing followed, so
+-- any fight could be ended by stepping through a doorway, which quietly
+-- undid the two-rate regen built to make breaking off a *decision*.
+FOLLOW_ODDS = 0.45       -- chance an adjacent, angry monster comes after you
+FOLLOW_MAX  = 2          -- but never a whole mob at once
+
+BARK_HOLD  = 45          -- a fresh bark is not shouted over (§5.4)
+STONE_DMG  = 2           -- a thrown stone is utility, not a damage source
 
 -- CONFIG arrives from carts/deeper.voxbox.json, installed by the host before
 -- this chunk loads (host.js, luaLiteral) and by tools/cartlab.py for the
@@ -142,6 +163,14 @@ FX_DECALS    = fx("decals", true)         -- rooms remember their dead
 FX_DISSOLVE  = fx("dissolve", true)       -- rooms build up on entry
 FX_DMGNUM    = fx("damage_numbers", true) -- damage prints over the target
 FX_THEMETORCH = fx("theme_torches", true) -- each depth lights differently
+
+-- Torchlight itself, and it is a flag like the rest now rather than a line on
+-- the title screen. It was toggled with z and remembered in cartdata slot 2 --
+-- a setting on the menu of a game whose menu is six rows of a 3x5 font, and
+-- the one row there that was neither a control nor a score. Flat mode is a
+-- legibility and performance escape hatch (§2.0), which is a thing you decide
+-- once about a machine, not something to offer between runs.
+lightfx = fx("torchlight", true)
 
 TEXTURES = FX_TEXTURES
 
@@ -187,6 +216,7 @@ ARM_MAX = 7              -- 2 + 3 + 2, the number the damage curve is tuned to
 DMG_BASE = 2             -- bare hands
 WPN_MAX  = 4
 SIGH_T   = 12            -- turns a sad ghost's sigh keeps your damage down
+CREW_REVIVE = 3          -- turns before a downed committee member gets up
 
 -- Flat-light mode: every cell forced to one level, so the room is evenly lit
 -- and the torch pools vanish. Toggled on the title screen and remembered in
@@ -473,6 +503,16 @@ function node_build(n, d)
         end
       end
     end
+    -- A chest or two, on the floor rather than replacing a pillar: you bump
+    -- it to open it, and what is inside is rolled from the floor's own loot
+    -- table. It exists mostly so the mimic's joke has something to land on.
+    for c = 1, irnd(3) do
+      local cx, cy = spot(n)
+      if cx then
+        add(n.props, { x = cx, y = cy, kind = "chest",
+                       ii = item_roll(d), used = false })
+      end
+    end
     if rnd(1) < 0.3 then
       local wx, wy = 2 + irnd(n.w - 6), 2 + irnd(n.h - 5)
       for y = wy, min(wy + 2, n.h - 2) do
@@ -516,12 +556,12 @@ function node_build(n, d)
   local want = min(n.kind == "corr" and (1 + irnd(2)) or (1 + irnd(4)), #cand)
   for i = 1, want do
     local j = irnd(#cand) + 1
-    add(n.torch, { x = cand[j].x, y = cand[j].y, ph = rnd(1) })
+    add(n.torch, { x = cand[j].x, y = cand[j].y, ph = rnd(1), lit = true })
     deli(cand, j)
   end
   if #n.torch == 0 then
     n.tile[0][flr(n.w / 2)] = T_WALL
-    add(n.torch, { x = flr(n.w / 2), y = 0, ph = rnd(1) })
+    add(n.torch, { x = flr(n.w / 2), y = 0, ph = rnd(1), lit = true })
   end
 end
 
@@ -540,9 +580,29 @@ function node_populate(n, d, idx)
   -- aggro radius of the same room -- which is what made floor 1 lethal.
   local count = clamp(flr(area / 130) + flr(d / 2) + irnd(2), 1, 8)
   if n.kind == "corr" then count = min(count, 2) end
+  local crew_id = 0
   for i = 1, count do
     local x, y = spot(n)
-    if x then add(n.mons, mon_new(mon_roll(d), x, y)) end
+    if x then
+      local bi = mon_roll(d)
+      local b = BESTIARY[bi]
+      if b.crew then
+        -- they arrive together or not at all: one committee member alone
+        -- would be unkillable, since there is nobody left to fail to revive it
+        crew_id = crew_id + 1
+        for k = 1, b.crew do
+          local cx, cy = (k == 1) and x or nil, (k == 1) and y or nil
+          if k > 1 then cx, cy = spot(n) end
+          if cx then
+            local c = mon_new(bi, cx, cy)
+            c.crew = crew_id
+            add(n.mons, c)
+          end
+        end
+      else
+        add(n.mons, mon_new(bi, x, y))
+      end
+    end
   end
   local loot = 1 + irnd(3)
   for i = 1, loot do
@@ -562,6 +622,7 @@ end
 function occupied(n, x, y)
   for m in all(n.mons or {}) do if m.x == x and m.y == y then return true end end
   for it in all(n.items or {}) do if it.x == x and it.y == y then return true end end
+  if prop_at(n, x, y) then return true end
   return false
 end
 
@@ -658,46 +719,57 @@ function light_build()
   -- like a bug rather than a torch. No sqrt is needed: the three band edges
   -- are compared as squared distances.
   for t in all(n.torch) do
-    local cx, cy = t.x * SUB + 1, t.y * SUB + 1
-    local r = 5.5 * SUB + sin(t.ph + flicker * 0.11) * 3.0
-    local r2, b1, b2 = r * r, (r / 3) * (r / 3), (r * 2 / 3) * (r * 2 / 3)
-    local warm2 = (r * 0.62) * (r * 0.62)
-    jit_scale(r)
-    for y = max(0, flr(cy - r)), min(LH - 1, flr(cy + r)) do
-      local lr, wr = lmap[y], wmap[y]
-      local dy = y - cy
-      local dy2 = dy * dy
-      local jrow = (y * 23) % JIT_N
-      for x = max(0, flr(cx - r)), min(LW - 1, flr(cx + r)) do
-        local dx = x - cx
-        local d2 = dx * dx + dy2 + JITR[(x * 9 + jrow) % JIT_N]
-        if d2 <= r2 then
-          local l = (d2 <= b1) and 3 or ((d2 <= b2) and 2 or 1)
-          if l > lr[x] then lr[x] = l end
-          if d2 <= warm2 then wr[x] = true end
+    if t.lit then                    -- a snuffed sconce lights nothing
+      local cx, cy = t.x * SUB + 1, t.y * SUB + 1
+      local r = 5.5 * SUB + sin(t.ph + flicker * 0.11) * 3.0
+      local r2, b1, b2 = r * r, (r / 3) * (r / 3), (r * 2 / 3) * (r * 2 / 3)
+      local warm2 = (r * 0.62) * (r * 0.62)
+      jit_scale(r)
+      for y = max(0, flr(cy - r)), min(LH - 1, flr(cy + r)) do
+        local lr, wr = lmap[y], wmap[y]
+        local dy = y - cy
+        local dy2 = dy * dy
+        local jrow = (y * 23) % JIT_N
+        for x = max(0, flr(cx - r)), min(LW - 1, flr(cx + r)) do
+          local dx = x - cx
+          local d2 = dx * dx + dy2 + JITR[(x * 9 + jrow) % JIT_N]
+          if d2 <= r2 then
+            local l = (d2 <= b1) and 3 or ((d2 <= b2) and 2 or 1)
+            if l > lr[x] then lr[x] = l end
+            if d2 <= warm2 then wr[x] = true end
+          end
         end
       end
     end
   end
 
-  -- the hero's own torch, and the reason the torch clock matters
-  local hr = (1 + flr(torchfuel / 70)) * SUB
+  -- The hero's own torch, and the reason the torch clock matters. Doused, it
+  -- contributes nothing at all -- you keep only what the wall sconces give
+  -- you, which is the price of not being seen.
+  -- A radius of zero is not "no light": the loop still runs once, over the
+  -- hero's own cell, and d2 = 0 <= 0 lights it to full. Doused, the hero was
+  -- therefore still standing in a level-3 pool of one cell -- so aggro never
+  -- dropped, nothing adjacent was ever in the dark, and the whole mechanic did
+  -- nothing while looking as though it worked. The skip has to be explicit.
+  local hr = torchlit and (1 + flr(torchfuel / 70)) * SUB or 0
   if spell_light > 0 then hr = hr + 3 * SUB end
-  local hx, hy = hero.tx * SUB + 1, hero.ty * SUB + 1
-  local hr2, hb = hr * hr, (hr / 2) * (hr / 2)
-  jit_scale(hr)
-  for y = max(0, hy - hr), min(LH - 1, hy + hr) do
-    local lr, wr = lmap[y], wmap[y]
-    local dy = y - hy
-    local dy2 = dy * dy
-    local jrow = (y * 23) % JIT_N
-    for x = max(0, hx - hr), min(LW - 1, hx + hr) do
-      local dx = x - hx
-      local d2 = dx * dx + dy2 + JITR[(x * 9 + jrow) % JIT_N]
-      if d2 <= hr2 then
-        local l = (d2 <= hb) and 3 or 2
-        if l > lr[x] then lr[x] = l end
-        wr[x] = true
+  if hr > 0 then
+    local hx, hy = hero.tx * SUB + 1, hero.ty * SUB + 1
+    local hr2, hb = hr * hr, (hr / 2) * (hr / 2)
+    jit_scale(hr)
+    for y = max(0, hy - hr), min(LH - 1, hy + hr) do
+      local lr, wr = lmap[y], wmap[y]
+      local dy = y - hy
+      local dy2 = dy * dy
+      local jrow = (y * 23) % JIT_N
+      for x = max(0, hx - hr), min(LW - 1, hx + hr) do
+        local dx = x - hx
+        local d2 = dx * dx + dy2 + JITR[(x * 9 + jrow) % JIT_N]
+        if d2 <= hr2 then
+          local l = (d2 <= hb) and 3 or 2
+          if l > lr[x] then lr[x] = l end
+          wr[x] = true
+        end
       end
     end
   end
@@ -1025,6 +1097,10 @@ function torch_draw(t)
   else ox = -3 end
   local bx, by = x + ox, y + oy
   boxfill(bx, by, 51, bx, by, 53, 5)
+  if not t.lit then
+    boxfill(bx - 1, by - 1, 49, bx + 1, by + 1, 50, 5)   -- cold, empty bracket
+    return
+  end
   local f = flr(frame / 3 + t.ph * 8) % 4
   local cols = { 9, 10, 9, 8 }
   boxfill(bx - 1, by - 1, 49, bx + 1, by + 1, 50, 8)
@@ -1094,8 +1170,18 @@ function hero_init()
   wpnv, sigh_t = 0, 0
   wpn_sync()
   torchfuel = 250
+  torchlit = true
+  stones = 0
+  ring, ring_sel = false, 1
   spells = {}
   spell_light, spell_conf, spell_chicken, spell_swap = 0, 0, 0, 0
+end
+
+-- The light level the *hero* is standing in, which is what everything else in
+-- the node is deciding by.
+function aggro_range()
+  local l = clamp(hero_light(), 0, 3)
+  return flr(AGGRO_DARK + (AGGRO_LIT - AGGRO_DARK) * l / 3 + 0.5)
 end
 
 -- arm is derived, never assigned directly: it was a bare counter that every
@@ -1223,39 +1309,91 @@ BESTIARY = {
     split = true, say = { "SORRY IN ADVANCE", "NO HARD FEELINGS" } },
   { n = "skeleton",   plan = "biped", ramp = "bone", hp = 8,  dmg = 3, d = 2,
     say = { "I AM ALL BONE, NO PLAN" } },
+  -- Armour of its own, four floors before the first boss wears any. It cannot
+  -- kill you, so it is where you learn that a bump can be refused.
+  { n = "tomb beetle", plan = "quad", ramp = "bone", hp = 7, dmg = 2, d = 2,
+    arm = 2, say = { "TAP. TAP. TAP." } },
   { n = "bat cloud",  plan = "swarm", ramp = "cold", hp = 5,  dmg = 2, d = 2,
     erratic = true, say = { "WE HAVE DISCUSSED THIS" } },
   { n = "minor poet", plan = "ghost", ramp = "ice",  hp = 6,  dmg = 1, d = 2,
     calm = true, say = { "I DIED DOING WHAT I",
                          "WHICH WAS, SADLY, THIS" } },
   { n = "mimic",      plan = "blob",  ramp = "warm", hp = 10, dmg = 4, d = 3,
-    say = { "OPEN ME. I AM A CHEST.", "A NORMAL CHEST" } },
+    mimic = true, say = { "OPEN ME. I AM A CHEST.", "A NORMAL CHEST" } },
   { n = "cultist",    plan = "biped", ramp = "blood", hp = 9, dmg = 3, d = 3,
     say = { "THE STARS ARE ALMOST", "GIVE IT A FORTNIGHT" } },
   { n = "hound",      plan = "quad",  ramp = "blood", hp = 9, dmg = 4, d = 3,
     charge = true, say = { "WHO IS A GOOD BOY" } },
+  { n = "chandelier rat", plan = "quad", ramp = "warm", hp = 6, dmg = 1, d = 3,
+    erratic = true, steal = true,
+    say = { "MINE NOW", "I HAVE EXPENSES TOO" } },
   { n = "wraith",     plan = "ghost", ramp = "ice",  hp = 12, dmg = 4, d = 4,
     drain = true, say = { "THAT ARMOUR IS HEAVY", "LET ME TAKE THAT" } },
   { n = "live armour", plan = "biped", ramp = "cold", hp = 14, dmg = 5, d = 4,
     drops = true, say = { "NOBODY IS IN HERE", "STOP ASKING" } },
   { n = "sad ghost",  plan = "ghost", ramp = "cold", hp = 10, dmg = 2, d = 4,
     sigh = true, say = { "I EXPECTED MORE", "SO DID YOUR MOTHER" } },
+  -- The only monster that attacks the light map instead of you (2.4)
+  { n = "sconce wraith", plan = "ghost", ramp = "gold", hp = 11, dmg = 3, d = 4,
+    snuff = true, say = { "LET US TALK IN THE DARK" } },
   { n = "cave troll", plan = "tall",  ramp = "moss", hp = 20, dmg = 6, d = 5,
     smash = true, say = { "TROLL REDECORATING" } },
   { n = "spider",     plan = "quad",  ramp = "bone", hp = 12, dmg = 4, d = 5,
     web = true, say = { "EIGHT LEGS, NO REGRETS" } },
+  { n = "the understudy", plan = "biped", ramp = "blood", hp = 13, dmg = 4, d = 5,
+    dropw = true, say = { "I KNOW ALL THE LINES", "LET ME HOLD THAT" } },
+  { n = "centipede",  plan = "serpent", ramp = "moss", hp = 16, dmg = 4, d = 5,
+    train = 2, say = { "ALL OF ME IS THE FRONT" } },
   { n = "lich clerk", plan = "biped", ramp = "ice",  hp = 18, dmg = 5, d = 6,
     say = { "EXPENSES ARE DENIED", "NO RECEIPT, NO REFUND" } },
   { n = "ghost landlord", plan = "ghost", ramp = "warm", hp = 14, dmg = 3, d = 6,
     rent = true, say = { "THAT WILL BE 40 GOLD", "THE DUNGEON ISNT FREE" } },
-  { n = "floating eye", plan = "ghost", ramp = "blood", hp = 16, dmg = 5, d = 7,
-    say = { "I HAVE SEEN YOUR BAG" } },
+  { n = "floating eye", plan = "eye", ramp = "blood", hp = 16, dmg = 5, d = 7,
+    confuse = true, say = { "I HAVE SEEN YOUR BAG", "YOUR LEFT IS MY RIGHT" } },
   { n = "regret",     plan = "ghost", ramp = "cold", hp = 14, dmg = 4, d = 8,
     follows = true, say = { "REMEMBER WHAT YOU SAID" } },
+  -- Follows you anywhere, like Regret, and is slower than you are. You can
+  -- outrun it; you cannot lose it.
+  { n = "grief",      plan = "ghost", ramp = "ice",  hp = 18, dmg = 4, d = 6,
+    follows = true, plod = true, say = { "TAKE YOUR TIME" } },
+  { n = "the echo",   plan = "eye",   ramp = "cold", hp = 15, dmg = 3, d = 7,
+    echo = true, say = { "SAY THAT AGAIN" } },
+  { n = "the auditor", plan = "biped", ramp = "ice", hp = 20, dmg = 4, d = 8,
+    audit = true, say = { "THIS IS NOT DEPRECIATED", "SHOW ME THE RECEIPT" } },
+  { n = "the committee", plan = "biped", ramp = "bone", hp = 9, dmg = 3, d = 9,
+    crew = 3, say = { "WE MOVE TO RECONVENE", "SIX HEADS, ONE BUDGET" } },
   { n = "the manager", plan = "tall", ramp = "blood", hp = 40, dmg = 7, d = 9,
     boss = true, say = { "I MUST ESCALATE THIS",
                          "A PERFORMANCE ISSUE" } },
 }
+
+-- Puts out the sconce nearest the wraith, not the one nearest you: it is
+-- snuffing the room it is standing in, and the difference shows when it comes
+-- at you down a lit corridor.
+--
+-- A snuffed sconce is not gone. Bumping the wall it hangs on relights it for a
+-- turn's cost (try_move), which keeps the light map something you can fight
+-- over rather than only lose.
+function snuff_torch(m)
+  local best, bd = nil, 99
+  for t in all(node.torch) do
+    if t.lit then
+      local d = chebyshev(t.x, t.y, m.x, m.y)
+      if d < bd then best, bd = t, d end
+    end
+  end
+  if not best then return false end
+  best.lit = false
+  sfx_safe("torch_douse")
+  burst(best.x, best.y, 10, { 5, 6, 1 })
+  light_build()
+  return true
+end
+
+function torch_at(n, x, y)
+  for t in all(n.torch) do if t.x == x and t.y == y then return t end end
+  return nil
+end
 
 -- ============================================================== 07b_boss ==
 -- Every tenth floor is held by a boss, and the stairs do not work until it is
@@ -1436,20 +1574,69 @@ function mon_new(bi, x, y)
   local hscale = 1 + (depth - 1) * 0.14
   local dscale = 1 + (min(depth, DMG_CAP_D) - 1) * 0.14
   local hp0 = flr(b.hp * hscale)
-  return {
+  local m = {
     bi = bi, x = x, y = y, px = x, py = y, anim = 0,
     hp = hp0, hp0 = hp0, dmg = flr(b.dmg * dscale), said = false, slow = 0,
+    arm = b.arm,
   }
+  if b.train then
+    m.seg = {}
+    for i = 1, b.train do add(m.seg, { x = x, y = y }) end
+  end
+  return m
 end
 
 function mon_draw(m)
   local b = BESTIARY[m.bi]
   local l = clamp(cell_light(m.x, m.y), 0, 3)
   local x, y = flr(vx(0) + m.px * TS) + 3, flr(vy(0) + m.py * TS) + 3
+
+  -- A mimic is a chest until it is not. Drawn as the real thing, from the same
+  -- function the real thing uses, so there is no tell to spot -- which is the
+  -- entire joke and the reason the chest had to exist before the mimic could.
+  if b.mimic and not m.angry then
+    chest_draw(x, y, l, false)
+    return
+  end
+  if m.down then                       -- a committee member, face down
+    boxfill(x - 2, y - 1, 56, x + 2, y + 1, 57, RAMPS[b.ramp][max(l, 1)])
+    return
+  end
+
+  -- the body first, so the head overlaps it rather than the other way round
+  if m.seg then
+    local c = RAMPS[b.ramp][l + 1]
+    local hi = RAMPS[b.ramp][min(l + 2, 4)]
+    for i = #m.seg, 1, -1 do
+      local sx = flr(vx(0) + m.seg[i].x * TS) + 3
+      local sy = flr(vy(0) + m.seg[i].y * TS) + 3
+      boxfill(sx - 2, sy - 2, 53, sx + 2, sy + 2, 56, c)
+      boxfill(sx - 2, sy + 2, 54, sx + 2, sy + 2, 55, hi)
+      boxfill(sx - 3, sy, 55, sx - 3, sy, 57, c)            -- legs
+      boxfill(sx + 3, sy, 55, sx + 3, sy, 57, c)
+    end
+  end
+
   plan_draw(b.plan, x, y,
             RAMPS[b.ramp][l + 1], RAMPS[b.ramp][min(l + 2, 4)],
             RAMPS.cold[l + 1], m.x)
   if m.boss then boss_dress(m, x, y, l) end
+end
+
+-- A chest, used by the real ones and by the thing pretending to be one.
+function chest_draw(x, y, l, open)
+  local wood = RAMPS.warm[max(l, 1) + 1]
+  local iron = RAMPS.cold[min(l + 1, 3) + 1]
+  boxfill(x - 3, y - 2, 53, x + 3, y + 2, 57, wood)          -- the box
+  boxfill(x - 3, y - 2, 54, x + 3, y + 2, 54, iron)          -- a band
+  boxfill(x - 1, y + 2, 55, x + 1, y + 2, 56, iron)          -- the lock
+  if open then
+    -- the lid, swung back and up off the far edge
+    boxfill(x - 3, y - 3, 49, x + 3, y - 2, 50, wood)
+  else
+    boxfill(x - 3, y - 2, 51, x + 3, y + 2, 52, wood)        -- lid, shut
+    boxfill(x - 3, y - 2, 51, x + 3, y + 2, 51, iron)
+  end
 end
 
 -- A boss occupies one tile like anything else -- the grid is the grid -- but
@@ -1543,6 +1730,52 @@ function plan_draw(plan, x, y, c, hi, trim, ph)
     boxfill(x + 3, y - 1, 41, x + 3, y + 1, 43, c)
     vset(x - 1, y + 2, 44, 8)
     vset(x + 1, y + 2, 44, 8)
+  elseif plan == "serpent" then
+    -- Only the head. The body segments are separate tiles and mon_draw walks
+    -- them, because a plan draws one tile and a centipede is three.
+    boxfill(x - 2, y - 2, 52, x + 2, y + 2, 56, c)          -- head
+    boxfill(x - 2, y + 2, 53, x + 2, y + 2, 55, hi)         -- face plate
+    boxfill(x - 3, y + 1, 50, x - 2, y + 1, 51, hi)         -- antennae
+    boxfill(x + 2, y + 1, 50, x + 3, y + 1, 51, hi)
+    boxfill(x - 3, y - 1, 55, x - 3, y + 1, 57, c)          -- legs
+    boxfill(x + 3, y - 1, 55, x + 3, y + 1, 57, c)
+    vset(x - 1, y + 3, 54, 8)                               -- eyes
+    vset(x + 1, y + 3, 54, 8)
+  elseif plan == "eye" then
+    -- One floating eyeball, hanging clear of the floor. It was drawn with the
+    -- `ghost` plan before -- dithered bands, which reads as a wraith -- so the
+    -- one monster in the book whose entire name is a description had the least
+    -- descriptive body in it.
+    --
+    -- The white, the iris and the pupil all go on the +y face, the one turned
+    -- toward the camera; on any other face they would be hidden by the ball
+    -- itself, which is the trap §0 keeps restating. The pupil is colour 0, so
+    -- it is a hole bored into the sclera rather than a black voxel -- the same
+    -- trick the statues use for carved eyes, and the only way to get true
+    -- black out of a 15-colour palette whose index 0 means empty.
+    local z = 49 + bob
+    sphere(x, y, z, 3, c)                                   -- the ball
+    -- The white is built on the two frontmost layers so it wraps the curve
+    -- rather than sitting on it as a decal, and the iris is a vertical bar
+    -- through the middle of it. The pupil is bored at y + 3, the sphere's own
+    -- front face: the first attempt bored at y + 4, which is outside a radius
+    -- of 3, so it carved empty air and the eye had no pupil at all.
+    boxfill(x - 1, y + 2, z - 1, x + 1, y + 2, z + 1, 7)
+    boxfill(x - 1, y + 3, z - 1, x + 1, y + 3, z + 1, 7)
+    -- The iris is a ring, not a bar. A vertical bar down the middle left white
+    -- standing either side of it and the whole face read as a mouth with
+    -- teeth; a ring round the pupil reads as an eye at a glance, which is the
+    -- only test that matters for something ten voxels tall.
+    boxfill(x - 1, y + 3, z - 1, x + 1, y + 3, z - 1, hi)
+    boxfill(x - 1, y + 3, z + 1, x + 1, y + 3, z + 1, hi)
+    vset(x - 1, y + 3, z, hi)
+    vset(x + 1, y + 3, z, hi)
+    vset(x, y + 3, z, 0)                                    -- pupil
+      -- three trailing nerves, the middle one longer, so it reads as hanging
+    for i = -1, 1 do
+      boxfill(x + i * 2, y - 1, z + 3, x + i * 2, y, z + 5 + (i == 0 and 2 or 0),
+              hi)
+    end
   else
     ghost_draw(x, y, c, hi, bob)
   end
@@ -1594,13 +1827,19 @@ ITEMS = {
   { n = "short sword",      k = "wpn",  v = 2 },
   { n = "war hammer",       k = "wpn",  v = 3 },
   { n = "rune blade",       k = "wpn",  v = 4 },
+  -- Appended, again, and for the reason the note above gives: slotting stones
+  -- in beside the weapons where they read best moved every weapon index by
+  -- one, so item_roll's ladder quietly handed out stones where it meant a
+  -- sharp stick and never rolled the rune blade at all. Grouping in this table
+  -- is cosmetic; position is load-bearing.
+  { n = "throwing stones",  k = "stone", v = 3 },
 }
 
 -- Food is deliberately common. Natural regen (REGEN) is slow enough that it
 -- only pays for retreating, so bread and draughts are what actually carry you
 -- between fights.
 function item_roll(d)
-  local pool = { 1, 1, 1, 2, 2, 2, 2, 14, 14, 3, 3, 8, 9, 10, 11, 12, 13 }
+  local pool = { 1, 1, 1, 2, 2, 2, 2, 14, 14, 3, 3, 19, 19, 8, 9, 10, 11, 12, 13 }
   -- Every armour piece used to be gated behind d >= 2, which meant the one
   -- floor where you have no armour at all was also the only floor where none
   -- could drop. Helms and breastplates now appear from the start, which puts
@@ -1661,6 +1900,10 @@ function item_take(it)
     torchfuel = min(400, torchfuel + d.v)
     say("you", "TORCH TOPPED UP")
     sfx_safe("potion_powerup")
+  elseif d.k == "stone" then
+    stones = stones + d.v
+    say("you", "STONES x" .. d.v)
+    sfx_safe("coin_pickup")
   elseif d.k == "wpn" then
     if d.v <= wpnv then
       say("you", "YOURS IS BETTER")
@@ -1700,6 +1943,7 @@ SPELLINFO = {
 
 function cast(s)
   local hx, hy = hero.tx, hero.ty
+  last_spell = s
   if s == "fireball" then
     sfx_safe("fireball_blast")
     burst(hx, hy, 40, { 8, 9, 10, 7 })
@@ -1748,6 +1992,122 @@ function cast(s)
     sfx_safe("chicken_morph")
     burst(hx, hy, 20, { 7, 10, 9 })
     say("you", "THIS WAS NOT THE PLAN")
+  end
+end
+
+-- ================================================================= 09b_ring ==
+-- Hold z, arrows select, release to use. Six buttons is the whole input
+-- surface (§9), so everything that is not a step or a bump has to share one --
+-- and a list you scroll needs no cursor and no menu screen.
+--
+-- z used to cast `spells[1]` and nothing else: no choice at all, and a
+-- fireball you were saving went off because it happened to be first. The ring
+-- also gives the two new verbs somewhere to live without spending a button
+-- each, which is the reason a torch and a handful of stones sit in the same
+-- list as a scroll. They are the same kind of thing: what you can do this turn
+-- that is not walking into something.
+function ring_items()
+  local r = {}
+  add(r, { k = "torch", n = torchlit and "douse torch" or "light torch",
+           c = torchlit and 9 or 5 })
+  if stones > 0 then
+    add(r, { k = "stone", n = "stones x" .. stones, c = 6 })
+  end
+  for i = 1, #spells do
+    add(r, { k = "spell", s = spells[i], i = i,
+             n = SPELLINFO[spells[i]].n, c = SPELLINFO[spells[i]].c })
+  end
+  return r
+end
+
+function ring_use(sel)
+  local r = ring_items()
+  local e = r[sel]
+  if not e then return end
+  if e.k == "torch" then
+    torchlit = not torchlit
+    say("you", torchlit and "THE TORCH CATCHES" or "YOU PINCH IT OUT")
+    sfx_safe(torchlit and "torch_light" or "torch_douse")
+  elseif e.k == "stone" then
+    -- a throw that finds nothing costs no turn: it never happened
+    if not throw_stone() then return end
+  else
+    deli(spells, e.i)
+    cast(e.s)
+  end
+  end_turn()
+end
+
+-- Stones aim themselves at the nearest monster sharing a row or column with
+-- clear ground between. Automatic, because the arrows are busy selecting while
+-- the ring is open and a second aiming mode would need a button there is not
+-- one of -- and because lining yourself up with something is already a real
+-- decision on a grid, so making that *be* the aim rewards positioning.
+function throw_stone()
+  local bi, bd = nil, 99
+  for i = 1, #node.mons do
+    local m = node.mons[i]
+    if m.x == hero.tx or m.y == hero.ty then
+      local d = chebyshev(m.x, m.y, hero.tx, hero.ty)
+      if d > 1 and d < bd and clear_line(m.x, m.y) then bi, bd = i, d end
+    end
+  end
+  if not bi then
+    say("you", "NOTHING LINES UP")
+    sfx_safe("deny_error")
+    return false
+  end
+  local m = node.mons[bi]
+  stones = stones - 1
+  sfx_safe("stone_throw")
+  -- the stone's flight, as particles along the line it took
+  local sx, sy = vx(hero.tx) + 3, vy(hero.ty) + 3
+  local ex, ey = vx(m.x) + 3, vy(m.y) + 3
+  for i = 1, 6 do
+    local t = i / 7
+    add(parts, { x = lerp(sx, ex, t), y = lerp(sy, ey, t), z = 52,
+                 vx = 0, vy = 0, vz = 0, life = 4 + i, cols = { 6, 7 } })
+  end
+  mon_hurt(bi, STONE_DMG + irnd(3))
+  return true
+end
+
+-- Unobstructed along a row or column: no wall, and nothing else standing in
+-- the way. Only ever walks one axis, so it is a loop and not a Bresenham.
+function clear_line(tx, ty)
+  local dx, dy = isgn(tx - hero.tx), isgn(ty - hero.ty)
+  local x, y = hero.tx + dx, hero.ty + dy
+  while x ~= tx or y ~= ty do
+    if not node_free(node, x, y) then return false end
+    if mon_at(x, y) then return false end
+    x, y = x + dx, y + dy
+  end
+  return true
+end
+
+-- The echo repeats your own last spell, aimed at you. Half the table is a
+-- gift when it lands -- an echo is not clever, it is only loud -- and the two
+-- that hurt are the two you were pleased with when you cast them.
+function echo_cast(b, s)
+  say(b.n, "SAY THAT AGAIN")
+  sfx_safe("scroll_warp")
+  if s == "fireball" then
+    hp = hp - max(1, 6 + depth - arm)
+    burst(hero.tx, hero.ty, 24, { 8, 9, 10 })
+    shake = 6
+    if hp <= 0 then die(b.n) end
+  elseif s == "chicken" then
+    spell_chicken = 30
+    burst(hero.tx, hero.ty, 12, { 7, 10 })
+  elseif s == "percussion" then
+    shake = 8
+    sigh_t = SIGH_T
+  elseif s == "annoy" then
+    spell_swap = 5
+  elseif s == "light" then
+    spell_light = 30                      -- thank you
+  else
+    spell_conf = 20                       -- also thank you
   end
 end
 
@@ -1825,15 +2185,24 @@ end
 
 -- ================================================================= 11_turn ==
 function try_move(dir)
-  if spell_swap > 0 then dir = OPPOSITE[dir] end
   hero.face = dir
-  local d = DIRS[dir]
-  local nx, ny = hero.tx + d[1], hero.ty + d[2]
   local n = node
+
+  -- Confusion scrambles where you *walk*, not where you swing: a bump at
+  -- something already beside you always lands, so the attack is resolved
+  -- against the direction you actually pressed.
+  --
+  -- Inverting attacks too made the floating eye unkillable, and not in the way
+  -- it looked: the inverted step walked the hero off, the eye chased into the
+  -- square they had left, and the bump after that swung at empty floor. The
+  -- combat probe found it in one run -- 484 bumps against a 16-health monster
+  -- that never died. "You cannot fight it" is a lockout, not a joke.
+  local ad = DIRS[dir]
+  local ax, ay = hero.tx + ad[1], hero.ty + ad[2]
 
   for i = #n.mons, 1, -1 do
     local m = n.mons[i]
-    if m.x == nx and m.y == ny then
+    if mon_covers(m, ax, ay) then
       local roll = max(1, dmg + irnd(3) + (spell_conf > 0 and 3 or 0)
                           - (sigh_t > 0 and 2 or 0))
       if spell_conf > 0 and rnd(1) < 0.35 then
@@ -1847,6 +2216,11 @@ function try_move(dir)
       return
     end
   end
+
+  -- nothing there to hit: now the confusion gets to decide where you go
+  if spell_swap > 0 then dir = OPPOSITE[dir] end
+  local d = DIRS[dir]
+  local nx, ny = hero.tx + d[1], hero.ty + d[2]
 
   if nx < 0 or ny < 0 or nx >= n.w or ny >= n.h then return end
   local t = n.tile[ny][nx]
@@ -1862,7 +2236,9 @@ function try_move(dir)
   if t == T_DOOR then
     local ex = n.exits[dir]
     if ex then
+      local chasers = door_chasers(n)
       enter(ex.to, ex.back)
+      door_arrive(chasers)
       -- a doorway costs a turn like any other step, or the torch never burns
       -- while you travel and whatever is waiting in the next node gets no move
       end_turn()
@@ -1882,7 +2258,18 @@ function try_move(dir)
     end
     return
   end
-  if t == T_WALL then return end
+  if t == T_WALL then
+    -- a dead sconce is worth a turn to bring back
+    local tt = torch_at(n, nx, ny)
+    if tt and not tt.lit and torchlit then
+      tt.lit = true
+      say("you", "THE SCONCE CATCHES")
+      sfx_safe("torch_light")
+      light_build()
+      end_turn()
+    end
+    return
+  end
 
   hero.tx, hero.ty = nx, ny
   hero.anim = MOVE_FR
@@ -1905,8 +2292,70 @@ function try_move(dir)
   end_turn()
 end
 
+-- Anything angry and within reach when you step through a doorway may come
+-- with you. Retreat was a total escape before -- nothing followed, so any
+-- fight could be ended by walking through a door, and the two-rate regen built
+-- to make breaking off a decision (§4.1) was deciding nothing. It keeps its
+-- health and its temper, so retreating buys you distance, not a fresh fight.
+--
+-- Capped, because a doorway that teleports six monsters onto you is not a
+-- decision either.
+function door_chasers(n)
+  local out = {}
+  for i = #n.mons, 1, -1 do
+    local m = n.mons[i]
+    if #out < FOLLOW_MAX and m.angry and not m.boss
+       and chebyshev(m.x, m.y, hero.tx, hero.ty) <= 1
+       and rnd(1) < FOLLOW_ODDS then
+      add(out, m)
+      deli(n.mons, i)
+    end
+  end
+  return out
+end
+
+function door_arrive(chasers)
+  local n = node
+  local came = 0
+  for m in all(chasers) do
+    for _, d in pairs(DIRS) do
+      local nx, ny = hero.tx + d[1], hero.ty + d[2]
+      if node_free(n, nx, ny) and not mon_at(nx, ny) then
+        m.x, m.y, m.px, m.py, m.anim = nx, ny, nx, ny, 0
+        add(n.mons, m)
+        came = came + 1
+        break
+      end
+    end
+  end
+  if came > 0 then
+    say("you", came > 1 and "THEY CAME TOO" or "IT CAME TOO")
+    sfx_safe("ghost_warn")
+  end
+end
+
 -- A statue talks. A shrine does one thing, once, and then only talks.
 function prop_touch(p)
+  if p.kind == "chest" then
+    if p.used then
+      say("the chest", "EMPTY. YOU EMPTIED IT.")
+      return
+    end
+    p.used = true
+    sfx_safe("chest_open")
+    burst(p.x, p.y, 14, { 10, 9, 7 })
+    -- the contents land beside it rather than under it, since you cannot
+    -- stand where the chest is
+    for _, d in pairs(DIRS) do
+      local nx, ny = p.x + d[1], p.y + d[2]
+      if node_free(node, nx, ny) and not occupied(node, nx, ny) then
+        add(node.items, item_new(p.ii, nx, ny))
+        break
+      end
+    end
+    say("the chest", "IT WAS A REAL CHEST")
+    return
+  end
   if p.kind == "statue" then
     local st = STATUES[p.si]
     say(st.n, st.say)
@@ -1919,8 +2368,26 @@ function prop_touch(p)
     sfx_safe("deny_error")
     return
   end
+  -- The wish well is the one shrine that asks for something, and it is the
+  -- only sink gold has ever had: it accumulated all run, fed the score, and
+  -- the ghost landlord took some of it away, which is a tax rather than a
+  -- choice. Priced against depth so a late purse still buys about one favour.
+  -- Checked before the shrine is marked spent -- being unable to afford it is
+  -- not the same as having used it, and it should still be there when you can.
+  if sh.k == "wish" then
+    local cost = 30 + depth * 10
+    if gold < cost then
+      say(sh.n, "IT WANTS " .. cost .. " GOLD")
+      sfx_safe("deny_error")
+      return
+    end
+    gold = gold - cost
+    hp = min(hpmax, hp + 12)
+    torchfuel = min(400, torchfuel + 140)
+  end
+
   p.used = true
-  -- Four kinds, and an unrecognised one still speaks and is still spent: the
+  -- Six kinds, and an unrecognised one still speaks and is still spent: the
   -- list is authored in the manifest, so a typo there should read as a shrine
   -- that did nothing much rather than stop the game.
   if sh.k == "heal" then
@@ -1950,7 +2417,10 @@ end
 
 function end_turn()
   turns = turns + 1
-  torchfuel = max(0, torchfuel - 1)
+  -- Fuel only burns while it is lit, so dousing conserves it as well as hiding
+  -- you. That is deliberate: it makes the stealth dial and the clock the same
+  -- dial, rather than two systems asking for the player's attention separately.
+  if torchlit then torchfuel = max(0, torchfuel - 1) end
   regen = regen + 1
   if regen >= (hunted() and REGEN or REGEN_CALM) then
     regen = 0
@@ -1965,6 +2435,7 @@ function end_turn()
     say("you", "THE DARK IS PERSONAL")
   end
   mons_turn()
+  crew_turn()
   light_build()
 end
 
@@ -1992,14 +2463,28 @@ function mons_turn()
     local b = BESTIARY[m.bi]
     if m.slow > 0 then
       m.slow = m.slow - 1
+    elseif b.plod and turns % 2 == 1 then
+      -- Slower than you are, and that is the whole threat: `follows` means it
+      -- never loses you, `plod` means you can always walk away from it. The
+      -- pair is what makes it dread rather than danger.
     else
       local d = chebyshev(m.x, m.y, hero.tx, hero.ty)
-      if d <= 1 then
+      if m.fleeing then
+        -- took what it came for
+        mon_step(m, isgn(m.x - hero.tx), isgn(m.y - hero.ty))
+      elseif d <= 1 then
         mon_attack(m, b)
-      elseif d <= AGGRO or b.follows then
+      elseif d <= aggro_range() or b.follows then
         if b.calm and not m.angry then
           if not m.said then bark(m, b) end
         else
+          -- A sconce wraith puts out the room before it comes for you. It is
+          -- the only monster that attacks the light map rather than the hero,
+          -- and it does it once, on the turn it notices you (2.4).
+          if b.snuff and not m.snuffed then
+            m.snuffed = true
+            if snuff_torch(m) then say(b.n, "LET US TALK IN THE DARK") end
+          end
           local dx = isgn(hero.tx - m.x)
           local dy = isgn(hero.ty - m.y)
           if b.erratic and rnd(1) < 0.4 then
@@ -2021,7 +2506,17 @@ function mon_step(m, dx, dy)
   for t in all(try) do
     local nx, ny = m.x + t[1], m.y + t[2]
     if (t[1] ~= 0 or t[2] ~= 0) and node_free(n, nx, ny)
-       and not (nx == hero.tx and ny == hero.ty) and not mon_at(nx, ny) then
+       and not (nx == hero.tx and ny == hero.ty) and not mon_at(nx, ny)
+       and not prop_at(n, nx, ny) then
+      -- A train drags its segments through the squares the head just left, so
+      -- the body is always a legal path by construction -- no segment can end
+      -- up inside a wall, because the head has already stood there.
+      if m.seg then
+        for k = #m.seg, 2, -1 do
+          m.seg[k].x, m.seg[k].y = m.seg[k - 1].x, m.seg[k - 1].y
+        end
+        m.seg[1].x, m.seg[1].y = m.x, m.y
+      end
       m.x, m.y = nx, ny
       m.anim = MOVE_FR
       return
@@ -2029,8 +2524,28 @@ function mon_step(m, dx, dy)
   end
 end
 
+-- Anything a monster occupies, head or body. A centipede is one entity across
+-- three tiles, so every occupancy test in the game has to ask the monster
+-- rather than compare its x and y -- otherwise things walk through its middle.
 function mon_at(x, y)
-  for m in all(node.mons) do if m.x == x and m.y == y then return true end end
+  for m in all(node.mons) do
+    if mon_covers(m, x, y) then return true end
+  end
+  return false
+end
+
+function mon_covers(m, x, y)
+  if m.x == x and m.y == y then return true end
+  if m.seg then
+    for s in all(m.seg) do if s.x == x and s.y == y then return true end end
+  end
+  return false
+end
+
+function prop_at(n, x, y)
+  for p in all(n.props or {}) do
+    if p.x == x and p.y == y then return true end
+  end
   return false
 end
 
@@ -2048,7 +2563,17 @@ function mon_attack(m, b)
       return
     end
   end
-  local hit = max(1, m.dmg - arm)
+  -- Something that struck out of an unlit tile before it had ever been angry
+  -- never gave you a chance to react: it gets the first hit, and it costs. The
+  -- flat AMBUSH rather than a multiplier so a rat in the dark is a shock and
+  -- not a death sentence.
+  local ambush = 0
+  if not m.seen and cell_light(m.x, m.y) == 0 then
+    ambush = AMBUSH
+    say(b.n, "SOMETHING IN THE DARK")
+  end
+  m.seen = true
+  local hit = max(1, m.dmg + ambush - arm)
   -- The sigh is a timed debuff, not a tax. It used to take a permanent point
   -- of damage every turn it stood next to you, and since base damage is 2 with
   -- a floor of 1, the *first* sigh took everything it could and no shrine,
@@ -2065,6 +2590,44 @@ function mon_attack(m, b)
     say(b.n, "THAT WILL BE " .. take .. " GOLD")
     return
   end
+  -- Takes a little and runs, rather than taking a lot and staying. The
+  -- landlord is a tax; this is a pickpocket, and the difference is that you
+  -- can chase it -- which is the point, because chasing it is a bad idea.
+  if b.steal and gold > 0 then
+    local take = min(gold, 15 + irnd(15))
+    gold = gold - take
+    m.fleeing = true
+    say(b.n, "MINE NOW. " .. take .. " GOLD")
+    sfx_safe("coin_pickup")
+    return
+  end
+  -- The auditor writes down a *rating*, not durability, and it reads the
+  -- weapon slot as well as the three armour ones -- the only thing in the game
+  -- that can take your blade back off you. The whetstone and the tidy-kit
+  -- altar are the appeal process.
+  if b.audit then
+    local bk, bv = nil, 0
+    for i = 1, #ARM_KINDS do
+      local k = ARM_KINDS[i]
+      if armv[k] > bv then bk, bv = k, armv[k] end
+    end
+    if wpnv > bv then bk, bv = "wpn", wpnv end
+    if bk == "wpn" then
+      wpnv = wpnv - 1 wpn_sync()
+      say(b.n, "THAT BLADE IS UNBUDGETED")
+      return
+    elseif bk then
+      armv[bk] = bv - 1 arm_sync()
+      say(b.n, "DEPRECIATED. SIGN HERE.")
+      return
+    end
+  end
+  -- Says your own last spell back at you. Half the table helps you when it
+  -- lands, which is the joke: the echo is not smart, it is just loud.
+  if b.echo and last_spell and rnd(1) < 0.5 then
+    echo_cast(b, last_spell)
+    return
+  end
   if (b.drain or m.boss) and arm > 0 then
     -- damages the best piece by a point rather than shaving a counter, so the
     -- repair path is the same as the acquisition path: find another of that
@@ -2079,6 +2642,21 @@ function mon_attack(m, b)
       arm_sync()
       say(b.n, "LET ME TAKE THAT")
     end
+  end
+  -- `spell_swap` inverts your direction keys and was read in try_move from the
+  -- first version of this cart, but nothing ever set it: the Boots of Slightly
+  -- Wrong Trousers (§4) were never built, so the code was unreachable and had
+  -- been for the life of the project. The floating eye's own gimmick -- "casts
+  -- a random spell each turn" -- was equally missing. One is the other's
+  -- source, so wiring them together closes both.
+  -- It cannot stack its own confusion, and that guard is the whole difference
+  -- between a gimmick and a lockout. Re-rolling every attack at 40% for eight
+  -- turns meant the effect never lapsed while the eye was adjacent -- so every
+  -- bump aimed at it walked away instead, and the combat probe reported the
+  -- floating eye as flatly unkillable. Five turns, then a window.
+  if b.confuse and spell_swap <= 0 and rnd(1) < 0.35 then
+    spell_swap = 5
+    say(b.n, "YOUR LEFT IS MY RIGHT")
   end
   hp = hp - hit
   sfx_safe("player_hurt")
@@ -2100,6 +2678,23 @@ function mon_hurt(i, amount)
   sfx_safe("sword_hit")
   burst(m.x, m.y, 6, { 8, 14, 7 })
   if m.hp > 0 and m.boss then boss_escalate(m, b) end
+  -- A committee member does not die, it is *carried*. As long as one of them
+  -- is still standing it brings the others back, so the fight is not won by
+  -- attrition -- it is won by putting all three down inside the same few
+  -- turns, which is what the fireball scroll has been waiting for.
+  if m.hp <= 0 and m.crew and not m.down then
+    m.down = true
+    m.hp = 0
+    m.revive = CREW_REVIVE
+    burst(m.x, m.y, 8, { 5, 6, 7 })
+    sfx_safe("enemy_hurt")
+    if crew_alive(m.crew) == 0 then
+      say(b.n, "THE MOTION CARRIES")
+    else
+      say(b.n, "WE WILL RECONVENE")
+    end
+    return
+  end
   if m.hp <= 0 then
     burst(m.x, m.y, 14, { 8, 9, 7 })
     sfx_safe("enemy_explode")
@@ -2108,6 +2703,12 @@ function mon_hurt(i, amount)
     score = score + 10 + depth * 5
     if m.boss then boss_down(m, b) end
     if b.drops then add(n.items, item_new(6, m.x, m.y)) end
+    -- the only monster that hands back a weapon, so the slot has a source
+    -- besides the floor's loot table and the boss
+    if b.dropw then
+      local w = weapon_for(depth)
+      if w then add(n.items, item_new(w, m.x, m.y)) end
+    end
     -- Children are flagged with their own field, not by scribbling on px:
     -- px is animation state and anim_lerp overwrites it on the next frame,
     -- which would let every child split again, for ever.
@@ -2133,6 +2734,59 @@ function mon_hurt(i, amount)
   end
 end
 
+-- How many of a crew are still on their feet.
+function crew_alive(id)
+  local n = 0
+  for m in all(node.mons) do
+    if m.crew == id and not m.down then n = n + 1 end
+  end
+  return n
+end
+
+-- Called once a turn: a crew with nobody left standing is finished and leaves,
+-- otherwise its fallen get up again on a timer. This is the only monster in
+-- the book that cannot be beaten by trading hits, and the fireball scroll has
+-- been sitting in the loot table waiting for a reason.
+function crew_turn()
+  local seen = {}
+  for m in all(node.mons) do
+    if m.crew and not seen[m.crew] then
+      seen[m.crew] = true
+      local up = crew_alive(m.crew)
+      for i = #node.mons, 1, -1 do
+        local c = node.mons[i]
+        if c.crew == m.crew and c.down then
+          if up == 0 then
+            burst(c.x, c.y, 12, { 8, 9, 7 })
+            decal(c.x, c.y, BESTIARY[c.bi].ramp)
+            kills = kills + 1
+            score = score + 10 + depth * 5
+            deli(node.mons, i)
+          else
+            c.revive = c.revive - 1
+            if c.revive <= 0 then
+              c.down = false
+              c.hp = max(2, flr(c.hp0 / 2))
+              burst(c.x, c.y, 10, { 7, 6, 12 })
+              say(BESTIARY[c.bi].n, "SECONDED. I AM BACK.")
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+-- The best weapon this depth has any business handing out.
+function weapon_for(d)
+  local best = nil
+  for i = 1, #ITEMS do
+    local it = ITEMS[i]
+    if it.k == "wpn" and it.v <= 1 + flr(d / 2) then best = i end
+  end
+  return best
+end
+
 -- ============================================================== 12_dialogue ==
 function say(who, txt)
   bark_who = who
@@ -2141,6 +2795,12 @@ function say(who, txt)
 end
 
 function bark(m, b)
+  -- Walk into a room holding eight monsters and eight of them barked on the
+  -- same turn, of which you saw the last. §5.4 claimed these were throttled;
+  -- `m.said` only ever limited each monster to one line in its life, which is
+  -- a different thing. A bark still up and fresh is left alone, and the
+  -- monster keeps its line for a turn when the screen is quiet.
+  if bark_t > BARK_HOLD then return end
   m.said = true
   if b.say and #b.say > 0 then
     say(b.n, b.say[irnd(#b.say) + 1])
@@ -2236,12 +2896,14 @@ function hud_draw()
   set_draw_slice(HUD_Y)
   print("d" .. depth .. " " .. theme.name .. "  g" .. gold, 0, hrow(0), theme.acc)
 
-  -- torch fuel, the clock that makes the light map a mechanic
+  -- Torch fuel, the clock that makes the light map a mechanic -- and now also
+  -- the stealth dial, so a doused torch has to read as *deliberately* out
+  -- rather than as empty. Grey says you chose this; red says you did not.
   local fw = flr(torchfuel / 400 * 28)
   line(HUD_MAPX, hrow(0) + 2, HUD_MAPX + 28, hrow(0) + 2, 5)
   if fw > 0 then
     line(HUD_MAPX, hrow(0) + 2, HUD_MAPX + fw, hrow(0) + 2,
-         torchfuel > 80 and 9 or 8)
+         not torchlit and 13 or (torchfuel > 80 and 9 or 8))
   end
 
   -- A boss gets a bar of its own on the row the spell line normally has to
@@ -2255,13 +2917,27 @@ function hud_draw()
       line(0, hrow(1) + 2, w, hrow(1) + 2, bm.phase >= 2 and 8 or 14)
     end
   end
-  if #spells > 0 then
-    local sx = bm and 68 or 0
-    local sn = SPELLINFO[spells[1]].n
-    print("z-" .. sub(sn, 1, bm and 5 or 22), sx, hrow(1), SPELLINFO[spells[1]].c)
+  -- What z would open. Not the first spell's name any more, because z no
+  -- longer casts it -- the count is what tells you whether the ring is worth
+  -- opening, and the name is one button away.
+  if not ring then
+    local n = #ring_items()
+    print("z-" .. n .. (n == 1 and " thing" or " things"),
+          bm and 68 or 0, hrow(1), n > 1 and 12 or 5)
   end
 
-  if pending then
+  -- While the ring is open it owns the lower rows: it is modal, the world is
+  -- not moving, and a bark from a turn ago is not what you are looking at.
+  -- Three entries at a time around the selection, so a long list still fits
+  -- two rows and the thing you are on is always the middle one.
+  if ring then
+    local r = ring_items()
+    local e = r[ring_sel]
+    print("- " .. sub(e.n, 1, HUD_COLS - 2), 0, hrow(2), e.c)
+    local tail = ""
+    for i = 1, #r do tail = tail .. (i == ring_sel and "+" or ".") end
+    print(tail .. "  arrows pick, let go", 0, hrow(3), 6)
+  elseif pending then
     print("pick up?  x yes  z no", 0, hrow(2), 10)
     print(sub(ITEMS[pending.ii].n, 1, HUD_COLS), 0, hrow(3),
           SPELLINFO[ITEMS[pending.ii].s].c)
@@ -2343,7 +3019,6 @@ function _init()
   cartdata("voxbox_deeper")
   hiscore = dget(0)
   best_depth = max(1, dget(1))
-  lightfx = dget(2) < 1        -- slot defaults to 0, so effects start on
   frame = 0
   flicker = 0
   modet = 0
@@ -2375,11 +3050,6 @@ function _update()
   anim_lerp()
 
   if mode == "title" then
-    if btnp(5) then
-      lightfx = not lightfx
-      dset(2, lightfx and 0 or 1)
-      sfx_safe("menu_select")
-    end
     if btnp(4) then
       mode = "play"
       modet = 0
@@ -2405,6 +3075,25 @@ function _update()
         pending = nil
         sfx_safe("ui_click")
       end
+    elseif btn(5) then
+      -- the ring is open: arrows select rather than move, and nothing happens
+      -- in the world until it is released
+      local r = ring_items()
+      if not ring then ring, ring_sel = true, 1 end
+      ring_sel = clamp(ring_sel, 1, #r)
+      if btnp(0) then
+        ring_sel = ring_sel - 1
+        if ring_sel < 1 then ring_sel = #r end
+        sfx_safe("ui_click")
+      elseif btnp(1) then
+        ring_sel = ring_sel + 1
+        if ring_sel > #r then ring_sel = 1 end
+        sfx_safe("ui_click")
+      end
+      rept = 0
+    elseif ring then
+      ring = false
+      ring_use(ring_sel)
     elseif hero.anim == 0 then
       -- held direction repeats: a roguelike where you have to tap for every
       -- step of a long corridor is a roguelike nobody finishes
@@ -2416,12 +3105,6 @@ function _update()
       elseif rept <= 0 then
         try_move(mv)
         rept = 6
-      end
-      if btnp(5) and #spells > 0 then
-        local s = spells[1]
-        deli(spells, 1)
-        cast(s)
-        end_turn()
       end
     end
 
@@ -2508,7 +3191,7 @@ end
 -- screen. Chosen for one of each plan and for ramps that read against a warm
 -- slab -- a `warm` monster on the orange rings would be invisible.
 PARADE = { "lich clerk", "hound", "sorry slime", "bat cloud",
-           "minor poet", "cave troll" }
+           "minor poet", "cave troll", "floating eye" }
 
 -- The ring is a flat ellipse across the *front* of the slab, and where it sits
 -- is measured rather than chosen. The tallest plan stands 17 voxels, and any
@@ -2564,9 +3247,8 @@ function title_draw()
     "deeper",
     "a voxbox roguelike",
     "arrows move and attack",
-    "x confirm   z cast",
+    "x confirm   hold z for kit",
     "best depth " .. best_depth .. "  hi " .. hiscore,
-    "z  torchlight " .. (lightfx and "on" or "off"),
     "press x to start",
   }
   local x = block_x(l)
@@ -2575,6 +3257,5 @@ function title_draw()
   banner(l[3], trow(2), 7, x)
   banner(l[4], trow(3), 7, x)
   banner(l[5], trow(4), 6, x)
-  banner(l[6], trow(5), lightfx and 10 or 6, x)
-  if frame % 40 < 26 then banner(l[7], trow(6), 10, x) end
+  if frame % 40 < 26 then banner(l[6], trow(5), 10, x) end
 end

@@ -185,8 +185,11 @@ than switched on.
 
 ### 2.0 Switching it off
 
-Torchlight toggles from the title screen with `z`, remembered in `cartdata`
-slot 2. Flat mode forces every cell to one level: the room is evenly lit, the
+Torchlight is `config.fx.torchlight` in the manifest. It was a row on the
+title screen toggled with `z` and remembered in `cartdata` slot 2, which spent
+one of six rows of a 3x5 font on the only line there that was neither a control
+nor a score — and flat mode is a thing you decide once about a machine, not
+between runs. Flat mode forces every cell to one level: the room is evenly lit, the
 pools disappear, and the light map collapses from ~590 run-length boxes to 3 —
 so it is a performance option as much as a legibility one. The Pot Helm's −2
 vision joke is inert while it is off, which is the honest cost.
@@ -321,6 +324,27 @@ frightening for a moment.
 
 This makes the lighting system load-bearing. Every torch on a wall is a
 resource, an escape route and a light source at once.
+
+**And it decides who sees you.** Aggro was a flat six tiles whatever the light,
+which meant the cart's one genuinely unique system was decoration: torchlight
+chose how the room *looked* and nothing else. How far something notices you now
+scales with how lit **you** are — eight tiles carrying a lit torch, three with
+it out — and anything that strikes from an unlit tile it has never been angry
+in gets `AMBUSH` extra damage for the hit you never saw coming.
+
+That makes **dousing** a real verb, and it lives in the ring (§9). It costs a
+turn, it blinds you to everything the wall sconces do not light, and it stops
+the fuel burning while it is out — so the stealth dial and the clock are the
+*same* dial rather than two systems competing for attention. Wall sconces stop
+being scenery: they are the light you keep when you give up your own.
+
+One trap here was invisible and worth recording. A radius of zero is not "no
+light": the falloff loop still runs once, over the hero's own cell, where
+`d2 = 0 <= 0` lights it to full. Doused, the hero was standing in a one-cell
+pool at level 3, so aggro never dropped, nothing adjacent was ever in the dark,
+and the entire mechanic did nothing while looking exactly as though it worked.
+The skip has to be explicit, and only a probe that walked to the darkest tile
+in the node and read the number back could tell the difference.
 
 ---
 
@@ -507,6 +531,13 @@ how much you have to earn them:
 | Bread, healing draught | +6, +14 | the common drop; food is deliberately frequent in the loot table |
 | Reaching a new floor | +8, and +2 max | makes the stairs worth pushing for rather than something you fall down at 2 hp |
 
+Two rates only mean something if breaking off is a decision, and for a long
+time it was not: **nothing followed you through a door**, so any fight could be
+ended by stepping through a doorway and the calm rate was free. Anything angry
+and adjacent when you leave now has a `FOLLOW_ODDS` chance of coming with you,
+up to `FOLLOW_MAX`, keeping its health and its temper. Retreat buys distance,
+not a fresh start.
+
 ### 4.2 Armour
 
 **Three slots, not a counter** — helm, chest, shield — each holding at most one
@@ -599,7 +630,7 @@ changes on a turn, which is most of the performance budget won back.
 
 ### 5.1 Body plans
 
-Six drawing functions, parameterised by palette and size, cover the whole
+Eight drawing functions, parameterised by palette and size, cover the whole
 menagerie: `biped`, `blob`, `floater`, `quadruped`, `swarm`, `tall`. A monster
 is data: plan, ramp, stats, behaviour, bark list.
 
@@ -637,7 +668,16 @@ and better looking than a faked alpha would be.
 | 5 | Spider Matriarch | quadruped | webs slow you |
 | 6 | Lich Accountant | biped | summons; denies your expenses |
 | 6 | Ghost Landlord | floater | charges rent in gold |
-| 7 | Floating Eye | floater | casts a random spell each turn |
+| 7 | Floating Eye | **eye** | confuses your directions for a few turns |
+| 2 | Tomb Beetle | quad | wears armour of its own — teaches the rule four floors before the boss uses it, on something that cannot kill you |
+| 3 | Chandelier Rat | quad | takes gold and runs. A pickpocket rather than a tax: you *can* chase it, and that is the mistake |
+| 4 | Sconce Wraith | ghost | puts out the nearest wall torch when it notices you. **The only monster that attacks the light map instead of the hero** (§2.4) — bump the wall to relight it |
+| 5 | The Understudy | biped | drops a *weapon*. The slot's only source besides the loot table and the boss |
+| 5 | Centipede | **serpent** | one monster across three tiles, dragging its body through the squares its head has already stood in |
+| 6 | Grief | ghost | `follows` you anywhere and moves every other turn. You can outrun it; you cannot lose it |
+| 7 | The Echo | eye | says your own last spell back at you. Half the table is a gift when it lands — it is not clever, only loud |
+| 8 | The Auditor | biped | writes down a *rating*, weapon slot included. The only thing that takes your blade back |
+| 9 | The Committee | biped | three of them, and any survivor revives the fallen. Cannot be won by trading hits — which is what the fireball scroll has been waiting for |
 | 8 | Regret | floater | follows you between rooms |
 | 10 | The Dungeon Manager | boss | escalates |
 
@@ -843,7 +883,11 @@ turn one off to see what it was doing.
   It costs a fixed ring position, a lighting level and nothing else, and the
   engine's drop shadows come free. Cast by *name*, so reordering the bestiary
   cannot silently change the line-up
-- Chest opening: lid rotates via three `boxfill`s over 5 frames, contents rise
+- **Chests**, on the floor rather than replacing a pillar: bump to open, and
+  the contents roll out beside it because you cannot stand where it is. They
+  exist mostly so the Mimic's joke has something to land on — it is drawn by
+  the *same* `chest_draw` a real one uses, so there is no tell to spot, which
+  is the whole gag and the reason the chest had to come first
 - Wall damage from the Cave Troll: tiles removed from the room grid, changing
   both the geometry and the light map
 
@@ -873,8 +917,26 @@ Six buttons is the whole input surface.
   refused one stays on the floor. Everything else is unambiguously good and is
   taken silently; a chicken potion is not. Walking off a refused scroll lets it
   ask again.
-- Z: open the **radial item ring** — hold Z, arrows select, release to use.
-  One button, no cursor, no menus.
+- Z: open the **ring** — hold Z, arrows select, release to use. One button, no
+  cursor, no menus.
+
+The ring is the reason six buttons is enough. Z used to cast `spells[1]` and
+nothing else: no choice at all, and a fireball you were saving went off because
+it happened to be first in the list. Held, it lists **everything you can do
+this turn that is not walking into something** — and that framing is what lets
+two new verbs arrive without spending a button each:
+
+| entry | what it is |
+|---|---|
+| torch | douse it to move unseen, light it to see (§2.4). Always present |
+| stones | thrown at whatever shares your row or column with clear ground between |
+| each scroll | cast, in the order you want rather than the order you found them |
+
+Stones aim themselves, and that is a consequence rather than a shortcut: the
+arrows are busy selecting while the ring is open, so a second aiming mode would
+need a button there is not one of. Lining yourself up with something is already
+a real decision on a grid, so making that *be* the aim rewards positioning. A
+throw that finds nothing costs no turn — it never happened.
 
 The HUD is on two planes, and §5.4 is why. On the back wall at y = 2, four rows
 anchored at x = 0 and 7 voxels apart; on a near slice at y = 104, the one row
@@ -883,10 +945,10 @@ that fits below the room:
 | Plane | Row | Left column, 24 characters | Right column, x ≥ 98 |
 |---|---|---|---|
 | y = 2 | 0 | depth, theme name, gold | torch fuel, a shrinking bar |
-| y = 2 | 1 | the held scroll | minimap |
-| y = 2 | 2 | speaker, or the pick-up prompt | ” |
-| y = 2 | 3 | the line itself, or the item's name | ” |
-| y = 104 | — | health pips, then armour pips | |
+| y = 2 | 1 | how many things the ring holds, or the boss's health | minimap |
+| y = 2 | 2 | speaker, the pick-up prompt, or the ring's selection | ” |
+| y = 2 | 3 | the line itself, the item's name, or the ring's dots | ” |
+| y = 104 | — | health pips, then armour, then weapon | |
 
 The **minimap** is the explored dungeon graph — chambers and corridors both —
 drawn with `line` on the same slice. It has its own column rather than a free

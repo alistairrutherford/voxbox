@@ -137,7 +137,7 @@ function probe_combat()
     hits_total = hits_total + hits
     if hp < hp0 then hurt = hurt + 1 end
   end
-  return unkillable, hits_total, hurt, badname or "-"
+  return unkillable, hits_total, hurt, badname or "-", #BESTIARY
 end
 
 -- Descend deliberately: teleport to the stair node, step onto the stairs, and
@@ -308,9 +308,9 @@ print(f"  armour {armAvg:.1f}/7 worn at end, {detours} detours, "
 # checkable rather than remembered.
 print(f"  deaths land at turn: {deathTurns.strip() or 'none'}")
 
-unk, hits, hurt, badname = call("probe_combat")
-print(f"combat: {unk} unkillable ({badname}), {hits} bumps for all 19, "
-      f"{hurt}/19 fought back")
+unk, hits, hurt, badname, nmon = call("probe_combat")
+print(f"combat: {unk} unkillable ({badname}), {hits} bumps for all {int(nmon)}, "
+      f"{int(hurt)}/{int(nmon)} fought back")
 
 nm, ni = call("probe_draw_all")
 print(f"drew all {nm} monsters and {ni} items for 12 frames: ok")

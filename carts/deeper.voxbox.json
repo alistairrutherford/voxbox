@@ -6,7 +6,14 @@
   "controls": [
     ["arrows", "move, or attack by bumping"],
     ["x", "confirm / start"],
-    ["z", "cast the held scroll (on the title screen: torchlight on/off)"],
+    ["hold z", "open the ring: arrows pick, let go to use"],
+    "the ring holds your torch, your stones and any scroll you carry",
+    "douse the torch to move unseen -- and it stops burning fuel while it is out",
+    "a lit torch is noticed from eight tiles, a doused one from three",
+    "something that strikes from an unlit tile gets the first hit",
+    "stones fly at whatever shares your row or column: line yourself up",
+    "walking through a door no longer loses a fight -- angry things follow",
+    "wishing wells take gold, which is the only thing gold is for",
     "your torch burns down: find oil before it does",
     "armour is the second bar: it subtracts from every hit you take",
     "health comes back slowly in a fight, quickly once nothing is hunting you",
@@ -27,7 +34,7 @@
   "_groundZ": "Pinned to the floor slab. Auto-derivation would work in a plain room, but a node full of pillars and sill walls shifts the mode of the topmost voxels and the drop shadows jump between rooms. Pinning keeps hero and monster shadows on the floor where they belong.",
   "groundZ": 58,
 
-  "_lighting": "Torchlight can be switched off from the title screen with z, and the choice is remembered in cartdata slot 2. Flat mode forces every light cell to one level, so the room is evenly lit and the pools disappear -- and the light map collapses from ~590 run-length boxes to 3, which makes it a performance option as well as a legibility one. The Pot Helm's -2 vision joke is inert while it is off.",
+  "_lighting": "config.fx.torchlight. Off forces every light cell to one level, so the room is evenly lit and the pools disappear -- and the light map collapses from ~590 run-length boxes to 3, which makes it a performance option as well as a legibility one. The Pot Helm's -2 vision joke is inert while it is off. It used to be a row on the title screen, toggled with z and remembered in cartdata slot 2, which spent one of six rows of a 3x5 font on the only line there that was neither a control nor a score -- and it is a thing you decide once about a machine, not between runs. Slot 2 is now unused; slots 0 and 1 still hold the high score and the deepest floor.",
 
   "_persistGlobals": "hiscore and best_depth go through cartdata/dget/dset. A mid-run resume would only need run_seed and depth, since the dungeon regenerates from its seed, but permadeath is the point.",
 
@@ -37,7 +44,7 @@
 
   "_config_monuments": "Statue and shrine text, the one part of the cart that is pure content. Statues are text only, so the list can grow as long as you like for nothing. A shrine also names a kind, and only the five the cart implements do anything: heal (+8 health), torch (refills the torch), arm (repairs the worst piece you are wearing), whet (a point back on the weapon slot, if you carry one), gold (a handful of coins). An unrecognised kind still speaks and is still spent once -- it just has no effect -- so a typo degrades rather than crashes. Both fields are drawn in the HUD banner: names and lines are written to 24 characters, which is what fits a row on the back plane beside the minimap column, and the font is A-Z 0-9 and ! \" ' ( ) + , - . / : ? _ (runtime/js/font.js). Anything else advances the cursor and draws nothing.",
 
-  "_config_fx": "Every visual flourish, as a named flag. Each one exists because something was measurably wrong without it, so they all default on except `textures`, which is still on trial -- turn any of them off to see what it was doing. textures: per-flagstone mottling of walls and floors (VOXBOX_ROGUE_PLAN 2.1b). wall_floor: walls never fall below light level 1, because index 1 of every ramp is the same navy and an unlit wall was literally the same colour as the unlit floor in front of it, leaving the room with no shape at all outside the torch pools. jitter: perturbs the squared distance per cell so light pools have ragged edges instead of compass-drawn arcs -- dithering the boundary would have been the textbook answer and would have wrecked the two RLE passes, since a checkerboard has no runs. hero_crest: two voxels of pink on the hero's head in a fixed colour the light map never touches, because everything else about him is drawn from the same ramps as a statue. arches: a lintel over each far-wall doorway, so exits are visible from across a dark room. liquid: water cycles its ramp along a travelling sine, drawn over the floor's cached runs rather than inside them. decals: blood and scorch stay where they were made for the life of the floor, lit like everything else so a stain in the dark is invisible. dissolve: rooms assemble over eight frames on entry instead of cutting in. damage_numbers: the number prints in the world on the target's own y-slice, which is exact rather than a guess at a projection the cart cannot do. theme_torches: each depth's torch pools use their own ramp -- all five themes named the same orange before, which switched off half the point of having two ramps per theme.",
+  "_config_fx": "Every visual flourish, as a named flag. Each one exists because something was measurably wrong without it, so they all default on except `textures`, which is still on trial -- turn any of them off to see what it was doing. textures: per-flagstone mottling of walls and floors (VOXBOX_ROGUE_PLAN 2.1b). wall_floor: walls never fall below light level 1, because index 1 of every ramp is the same navy and an unlit wall was literally the same colour as the unlit floor in front of it, leaving the room with no shape at all outside the torch pools. jitter: perturbs the squared distance per cell so light pools have ragged edges instead of compass-drawn arcs -- dithering the boundary would have been the textbook answer and would have wrecked the two RLE passes, since a checkerboard has no runs. hero_crest: two voxels of pink on the hero's head in a fixed colour the light map never touches, because everything else about him is drawn from the same ramps as a statue. arches: a lintel over each far-wall doorway, so exits are visible from across a dark room. liquid: water cycles its ramp along a travelling sine, drawn over the floor's cached runs rather than inside them. decals: blood and scorch stay where they were made for the life of the floor, lit like everything else so a stain in the dark is invisible. dissolve: rooms assemble over eight frames on entry instead of cutting in. damage_numbers: the number prints in the world on the target's own y-slice, which is exact rather than a guess at a projection the cart cannot do. theme_torches: each depth's torch pools use their own ramp -- all five themes named the same orange before, which switched off half the point of having two ramps per theme. torchlight: the light map itself; off is flat mode, see _lighting.",
 
   "config": {
     "fx": {
@@ -50,7 +57,8 @@
       "decals": true,
       "dissolve": true,
       "damage_numbers": true,
-      "theme_torches": true
+      "theme_torches": true,
+      "torchlight": true
     },
 
     "statues": [
@@ -93,7 +101,10 @@
       { "n": "a soldiers memorial",      "k": "whet",  "say": "HE LEFT YOU HIS EDGE" },
       { "n": "the lost sock reliquary",  "k": "gold",  "say": "A COIN. ODDLY WARM." },
       { "n": "the tax collectors urn",   "k": "gold",  "say": "SOME OF IT COMES BACK" },
-      { "n": "a wishing well, dry",      "k": "gold",  "say": "A COIN. NO WISH." }
+      { "n": "a wishing well, dry",      "k": "gold",  "say": "A COIN. NO WISH." },
+      { "n": "the wishing well",         "k": "wish",  "say": "THE COINS BUY WARMTH" },
+      { "n": "a coin-fed brazier",       "k": "wish",  "say": "IT TAKES YOUR MONEY" },
+      { "n": "the toll shrine",          "k": "wish",  "say": "PAID. YOU FEEL BETTER" }
     ]
   }
 }
