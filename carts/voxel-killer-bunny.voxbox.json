@@ -1,0 +1,23 @@
+{
+  "_comment": "Per-cart manifest for the walkable diorama. See carts/voxel-killer-bunny.lua.",
+
+  "name": "voxel killer bunny",
+
+  "controls": [
+    ["arrows", "walk"],
+    ["x", "jump"],
+    "the terraces are four voxels up and the plateau is eight: both need the jump",
+    "watch the drop shadow to judge where you will land",
+    "the river only slows you down"
+  ],
+
+  "_camera": "Three-quarter view from off the near-LEFT corner. The side is not a free choice: the HUD boards are drawn on a y slice, so screen-right has to run along +x or their text reads backwards and they tilt the wrong way -- which also caps the azimuth, since a slice seen near 45 degrees skews the 3x5 font past reading (the bundled roguelike settles at 12 for the same reason). 20 degrees of azimuth and 30 of elevation. Elevation is the angle that decides whether the diorama reads as a chunky block or as a plate seen from above -- the slab's screen aspect is 1/sin(elevation) -- and it is the one that was wrong for three passes at 35 to 36. Framing is then solved rather than nudged, as the roguelike's is: project the slab's eight corners and the HUD's, walk the target along the camera's own right and up axes until that box is centred, open the fov until it fits with a margin. tools note: any of this can be overridden per-run with ?cam=x,y,z&tgt=x,y,z&fov=n, which is how these angles were compared.",
+  "camera": {
+    "pos": [11, 248, -60],
+    "target": [74, 76, 46],
+    "fov": 37
+  },
+
+  "_groundZ": "Pinned to the lawn. Auto-derivation would find it anyway, but the drop shadow is how you read the bunny's height while it is in the air, and a jump that lands on a terrace must not be the moment the plane moves.",
+  "groundZ": 46
+}

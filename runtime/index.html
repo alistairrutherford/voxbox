@@ -70,6 +70,23 @@
  button{background:#1a1a1a;color:#9a9;border:1px solid #333;
         font:12px monospace;padding:3px 10px;cursor:pointer;margin:2px 4px 2px 0}
  button:hover{border-color:#575}
+ /* view control: orbit the camera with the mouse, tick to keep the result.
+    Sits above the overlays because the launcher covers the whole stage, and
+    the idle slab is worth being able to turn too. */
+ #viewctl{position:absolute;top:6px;right:6px;z-index:6;
+          background:#000b;border:1px solid #2a2a2a;border-radius:3px;
+          padding:5px 7px;display:flex;flex-direction:column;gap:4px;
+          align-items:flex-start;font:11px/1.4 monospace}
+ #viewctl label{display:flex;align-items:center;gap:5px;color:#9a9;cursor:pointer}
+ #viewctl input{accent-color:#5a5;margin:0;cursor:pointer}
+ #viewcam{color:#667;font-size:10px;white-space:pre;cursor:copy}
+ #viewcam:hover{color:#8a8}
+ #viewctl button{margin:0;padding:1px 6px;font-size:10px;color:#899;border-color:#333}
+ body.view-locked #viewcam{color:#7a8a7a}
+ #screen{cursor:grab}
+ body.view-locked #screen{cursor:default}
+ body.view-drag #screen{cursor:grabbing}
+ body.view-drag{user-select:none;-webkit-user-select:none}
  /* touch controls: shown on touch devices or with ?touch=1 */
  #touch{display:none;position:fixed;left:0;right:0;bottom:0;top:0;
         pointer-events:none;z-index:5}
@@ -90,6 +107,11 @@
 <body>
 <div id="stage">
  <canvas id="screen" width="960" height="720"></canvas>
+ <div id="viewctl">
+  <label><input type="checkbox" id="viewlock"> lock view</label>
+  <div id="viewcam" title="click to copy as a .voxbox.json camera block">—</div>
+  <button id="viewreset" class="alt">reset</button>
+ </div>
  <div id="pausemenu" class="overlay">
   <div class="card">
    <h2>paused</h2>
@@ -143,6 +165,7 @@
   <div id="host-controls">
    <div><kbd>esc</kbd> pause menu · <kbd>p</kbd> pause · <kbd>n</kbd> step</div>
    <div><kbd>m</kbd> mute · gamepad: stick/dpad + A/B</div>
+   <div>drag to turn the view · wheel to zoom · <kbd>shift</kbd>-drag to pan</div>
   </div>
  </section>
  <section><h3>audio</h3>

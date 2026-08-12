@@ -51,6 +51,7 @@ async function cartId(chunks) {
 const saveKey = (id) => `voxbox_save:${id}`;
 const stubKey = (id) => `voxbox_extra_stubs:${id}`;
 const dataKey = (id) => `voxbox_cartdata:${id}`;
+const camKey = (id) => `voxbox_camera:${id}`;   // a view locked in by hand
 const MUTE_KEY = 'voxbox_mute';   // a shell preference, not a per-cart one
 
 // Storage keys were FNV-1a before SHA-256; carry a save across so it is not
@@ -425,17 +426,25 @@ async function boot() {
     if (man?.name) { cart = { ...cart, name: man.name }; showCart(); }
     showControls(man);
 
-    // camera: URL params stay authoritative, being explicit user intent
-    if (man?.camera) {
-      renderer.setCamera({
-        pos: vec('cam', man.camera.pos || CAM.pos),
-        target: vec('tgt', man.camera.target || CAM.target),
-        fovDeg: q.get('fov') ? Number(q.get('fov')) : (man.camera.fov ?? CAM.fovDeg),
-        aspect: CAM.aspect,
-      });
-    } else {
-      renderer.setCamera(CAM);
-    }
+    // Camera, in order of who gets the last word: URL params (explicit intent
+    // for this run), then a view the player locked in for this cart, then the
+    // cart's manifest, then the shell default. The lock outranks the manifest
+    // deliberately -- it exists to overrule a camera you did not like -- and
+    // "reset" beside the checkbox puts the manifest back.
+    camId = id;
+    baseView = {
+      pos: man?.camera?.pos || CAM.pos,
+      target: man?.camera?.target || CAM.target,
+      fov: man?.camera?.fov ?? CAM.fovDeg,
+    };
+    const kept = savedView(id);
+    const start = kept || baseView;
+    setView({
+      pos: vec('cam', start.pos),
+      target: vec('tgt', start.target),
+      fov: q.get('fov') ? Number(q.get('fov')) : start.fov,
+    });
+    setLocked(!!kept, false);
 
     // Drop shadows need to know where the ground is. Default is to derive it
     // from the volume each frame (see Volume.groundPlane); a cart whose scene
@@ -657,7 +666,10 @@ async function boot() {
   function showLauncher() {
     document.body.classList.add('no-cart');
     status('no cart loaded');
-    renderer.setCamera(CAM);
+    camId = null;                 // nothing to remember a view against
+    baseView = { pos: CAM.pos, target: CAM.target, fov: CAM.fovDeg };
+    setLocked(false, false);
+    setView(baseView);
     renderer.setGround({ mode: 'auto' });
     idleAt = 0;                     // force a redraw on the next frame
   }
@@ -758,13 +770,145 @@ async function boot() {
   // not here. A cart's manifest overrides the default; URL params override
   // both, e.g. /?cam=64,260,-95&tgt=64,60,36&fov=26
   const vec = (k, dflt) => q.get(k) ? q.get(k).split(',').map(Number) : dflt;
-  const CAM = {
-    pos: vec('cam', [64, 267, -116]),
-    target: vec('tgt', [64, 64, 32]),
-    fovDeg: q.get('fov') ? Number(q.get('fov')) : 45,
-    aspect: canvas.width / canvas.height,
+  const CAM = { pos: [64, 267, -116], target: [64, 64, 32], fovDeg: 45 };
+  const ASPECT = canvas.width / canvas.height;
+  const renderer = new Renderer(canvas, { ...CAM, aspect: ASPECT });
+
+  // ---- the camera as an orbit ------------------------------------------
+  // The renderer wants an eye position; a mouse wants azimuth, elevation and
+  // distance. So the shell keeps the orbit and derives the eye, which is also
+  // the only representation in which "drag sideways" is one number.
+  //
+  // Elevation is clamped short of either pole: the up vector is cross(F, -z),
+  // which is zero when the view is straight down, and a camera with no defined
+  // "right" tears on the way through.
+  const D2R = Math.PI / 180;
+  const view = { target: [64, 64, 32], dist: 240, az: 0, el: 45, fov: 45 };
+
+  function dir() {
+    const c = Math.cos(view.el * D2R);
+    return [Math.sin(view.az * D2R) * c, -Math.cos(view.az * D2R) * c,
+            Math.sin(view.el * D2R)];
+  }
+  function basis() {                       // same construction as render.js
+    const F = dir();
+    const l = Math.hypot(F[1], F[0]) || 1;
+    const R = [-F[1] / l, F[0] / l, 0];
+    const U = [R[1] * F[2], -R[0] * F[2], R[0] * F[1] - R[1] * F[0]];
+    return { F, R, U };
+  }
+  const eye = () => { const F = dir(); return view.target.map((t, i) => t - F[i] * view.dist); };
+
+  function applyView() {
+    renderer.setCamera({
+      pos: eye(), target: view.target, fovDeg: view.fov, aspect: ASPECT,
+    });
+    showView();
+    renderer.frame(vol);      // the loop only repaints on a step, and a drag
+  }                           // has to answer while paused or on the launcher
+
+  // pos/target/fov (how a manifest states it) -> orbit
+  function setView({ pos, target, fov }) {
+    view.target = target.slice();
+    const d = pos.map((v, i) => v - target[i]);
+    view.dist = Math.hypot(...d) || 1;
+    const F = d.map((v) => -v / view.dist);
+    view.el = Math.asin(Math.max(-1, Math.min(1, F[2]))) / D2R;
+    view.az = Math.atan2(F[0], -F[1]) / D2R;
+    view.fov = fov;
+    applyView();
+  }
+
+  // The readout is the manifest's own camera block, because the point of
+  // finding a view by hand is usually to write it down.
+  const camBlock = () => {
+    const n = (a) => a.map(Math.round).join(', ');
+    return `"pos": [${n(eye())}],\n"target": [${n(view.target)}],\n"fov": ${Math.round(view.fov)}`;
   };
-  const renderer = new Renderer(canvas, CAM);
+  function showView() {
+    $('#viewcam').textContent =
+      `${camBlock()}\naz ${view.az.toFixed(0)}°  el ${view.el.toFixed(0)}°`;
+  }
+
+  // ---- mouse: drag to orbit, shift-drag to pan, wheel to zoom ----------
+  const stage = $('#stage');
+  let viewLocked = false, drag = null, camId = null, baseView = null;
+  const onCtl = (e) => e.target.closest('.card, #viewctl, button, input');
+
+  stage.addEventListener('mousedown', (e) => {
+    if (viewLocked || onCtl(e) || (e.button !== 0 && e.button !== 1)) return;
+    drag = { x: e.clientX, y: e.clientY, pan: e.shiftKey || e.button === 1 };
+    document.body.classList.add('view-drag');
+    e.preventDefault();
+  });
+  addEventListener('mousemove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    drag.x = e.clientX; drag.y = e.clientY;
+    if (drag.pan) {
+      // world units per pixel at the target's depth, so the scene keeps pace
+      // with the pointer instead of sliding out from under it
+      const k = 2 * Math.tan(view.fov * D2R / 2) * view.dist / (stage.clientHeight || 1);
+      const { R, U } = basis();
+      view.target = view.target.map((v, i) => v - R[i] * dx * k + U[i] * dy * k);
+    } else {
+      view.az += dx * 0.35;                            // drag right, scene right
+      view.el = Math.max(3, Math.min(87, view.el + dy * 0.3));
+    }
+    applyView();
+  });
+  const endDrag = () => { drag = null; document.body.classList.remove('view-drag'); };
+  addEventListener('mouseup', endDrag);
+  addEventListener('blur', endDrag);
+
+  stage.addEventListener('wheel', (e) => {
+    if (viewLocked || onCtl(e)) return;
+    // dolly rather than zoom the lens: it keeps the perspective the manifest
+    // asked for, and it is what a scroll wheel means in every other 3D view
+    view.dist = Math.max(40, Math.min(900, view.dist * Math.exp(e.deltaY * 0.0012)));
+    applyView();
+    e.preventDefault();
+  }, { passive: false });
+
+  // ---- lock ------------------------------------------------------------
+  // Ticked, the view stops listening to the mouse and is remembered for this
+  // cart, taking precedence over its manifest next time it is loaded. It is
+  // per cart because a view is about a scene, not about the shell.
+  const lockBox = $('#viewlock');
+  function setLocked(on, save) {
+    viewLocked = on;
+    lockBox.checked = on;
+    document.body.classList.toggle('view-locked', on);
+    if (!save || !camId) return;
+    try {
+      if (on) {
+        localStorage.setItem(camKey(camId), JSON.stringify({
+          pos: eye().map(Math.round),
+          target: view.target.map(Math.round),
+          fov: Math.round(view.fov),
+        }));
+      } else localStorage.removeItem(camKey(camId));
+    } catch { /* private mode: the lock just won't outlive the tab */ }
+  }
+  function savedView(id) {
+    try {
+      const v = JSON.parse(localStorage.getItem(camKey(id)) || 'null');
+      return v && v.pos && v.target ? v : null;
+    } catch { return null; }
+  }
+  lockBox.addEventListener('change', () => setLocked(lockBox.checked, true));
+  $('#viewreset').addEventListener('click', () => {
+    setLocked(false, true);
+    if (baseView) setView(baseView);
+  });
+  $('#viewcam').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(camBlock());
+      const el = $('#viewcam'), was = el.style.color;
+      el.style.color = '#9d9';
+      setTimeout(() => { el.style.color = was; }, 400);
+    } catch { /* no clipboard permission: the numbers are still on screen */ }
+  });
 
   // ---- pause / single-step -------------------------------------------
   let paused = false;
