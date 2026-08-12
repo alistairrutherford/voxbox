@@ -64,6 +64,7 @@ SPD_WADE = 0.55         -- the river is worth avoiding, not fatal
 GRAV     = 0.38
 JUMP     = -2.7         -- up is -z: this apexes ~9 voxels, enough for a terrace
 STEP_UP  = 2            -- anything taller than this has to be jumped
+STRIDE   = 0.06         -- hop cycles per voxel walked: ~17 voxels a bound
 
 -- ================================================================== 02_map ==
 -- Row = y (0 = far wall), column = x. The camera stands off the near-left
@@ -473,6 +474,8 @@ function bunny_init()
   bair = false
   bwet = false
   bhop = 0                                 -- landing squash, in frames
+  bwalk = 0                                -- hop cycle, 0..1
+  barc = 0                                 -- and its height, 0 while planted
 end
 
 -- Movement is resolved one axis at a time so a wall you walk into diagonally
@@ -488,6 +491,7 @@ function try_move(nx, ny)
 end
 
 function bunny_update()
+  local ox, oy = bx, by
   local dx, dy = 0, 0
   if btn(0) then dx = -1 end
   if btn(1) then dx = 1 end
@@ -520,6 +524,26 @@ function bunny_update()
   end
   if bhop > 0 then bhop = bhop - 1 end
 
+  -- The hop cycle is driven by distance covered rather than by time. A rabbit
+  -- is the one animal whose walk *is* a bounce, so the gait is one arc per
+  -- stride: keyed to distance it stays in step at any speed -- wading included,
+  -- where the same stride simply takes twice as long -- and it cannot run on
+  -- the spot against a wall, because a blocked move covers no ground.
+  local moved = abs(bx - ox) + abs(by - oy)
+  if bair then
+    bwalk = 0                              -- a jump is its own pose
+  elseif moved > 0.02 then
+    bwalk = (bwalk + moved * STRIDE) % 1
+  elseif bwalk > 0 then
+    bwalk = (bwalk + 0.07) % 1             -- stopping finishes the hop rather
+    if bwalk < 0.07 then bwalk = 0 end     -- than freezing it mid-air
+  end
+
+  -- One arc per cycle: airborne for the first half, planted for the second.
+  local arc = bair and 0 or max(0, -sin(bwalk))
+  if barc > 0 and arc == 0 then bhop = max(bhop, 2) end   -- came down: squash
+  barc = arc
+
   local ch = tile(flr(bx / TILE), flr(by / TILE))
   local wet = (ch == "~" or ch == "W") and not bridge_z(bx, by)
   if wet and not bwet then sfx_safe("splash") end
@@ -539,14 +563,21 @@ function bpart(l0, f0, u0, l1, f1, u1, c)
 end
 
 function bunny_draw()
-  bux, buy, buz = flr(bx), flr(by), flr(bz)
-  local sq = bhop > 0 and 2 or 0                   -- lands with a bend
-  local tuck = bair and 2 or 0                     -- and tucks its feet up
-  local lay = bair and 1 or 0                      -- ears go back in the air
+  -- The hop is applied to the origin, so the whole animal leaves the ground
+  -- together and every part below stays where it was built. Only the feet get
+  -- their own extra lift, which is what folds the legs up under it.
+  local rise = flr(barc * 3.4)
+  local curl = flr(barc * 2.4)
+  local reach = (barc > 0 and bwalk > 0.25) and 1 or 0   -- feet out to land
+  bux, buy, buz = flr(bx), flr(by), flr(bz) - rise
+
+  local sq = min(2, bhop)                          -- lands with a bend
+  local tuck = (bair and 2 or 0) + curl            -- and tucks its feet up
+  local lay = (bair or barc > 0.5) and 1 or 0      -- ears go back in the air
   local top = 13 - sq
 
-  bpart(-2, 0, tuck, -1, 2, tuck + 1, C_FUR)       -- feet, one either side
-  bpart(1, 0, tuck, 2, 2, tuck + 1, C_FUR)
+  bpart(-2, reach, tuck, -1, 2 + reach, tuck + 1, C_FUR)   -- feet, one each side
+  bpart(1, reach, tuck, 2, 2 + reach, tuck + 1, C_FUR)
   bpart(-2, -2, 1, 2, 1, 7 - sq, C_FUR)            -- body
   bpart(-1, -3, 3, 1, -3, 5, C_FUR)                -- scut
   bpart(-1, -1, 7 - sq, 1, 1, 8 - sq, C_FUR)       -- neck: the notch that
@@ -566,7 +597,8 @@ function bunny_draw()
   bpart(3, 0, 6, 3, 0, 14, C_BLADE)                -- blade up past the ear
   bpart(2, 0, 6, 4, 0, 6, C_BLADE)                 -- crossguard
 
-  -- a ripple where it stands in the river
+  -- a ripple where it stands in the river, on the water rather than on the
+  -- bunny: it must not ride up with the hop
   if bwet and not bair then
     local r = 4 + (tick % 20) / 10
     boxfill(bux - r, buy - r, Z_WATER - 1, bux + r, buy + r, Z_WATER - 1, C_FOAM)

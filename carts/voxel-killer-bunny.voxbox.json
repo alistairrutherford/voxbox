@@ -11,9 +11,9 @@
     "the river only slows you down"
   ],
 
-  "_camera": "Three-quarter view from off the near-LEFT corner. The side is not a free choice: the HUD boards are drawn on a y slice, so screen-right has to run along +x or their text reads backwards and they tilt the wrong way -- which also caps the azimuth, since a slice seen near 45 degrees skews the 3x5 font past reading (the bundled roguelike settles at 12 for the same reason). 20 degrees of azimuth and 30 of elevation. Elevation is the angle that decides whether the diorama reads as a chunky block or as a plate seen from above -- the slab's screen aspect is 1/sin(elevation) -- and it is the one that was wrong for three passes at 35 to 36. Framing is then solved rather than nudged, as the roguelike's is: project the slab's eight corners and the HUD's, walk the target along the camera's own right and up axes until that box is centred, open the fov until it fits with a margin. tools note: any of this can be overridden per-run with ?cam=x,y,z&tgt=x,y,z&fov=n, which is how these angles were compared.",
+  "_camera": "Three-quarter view from off the near-LEFT corner, set by hand with the shell's view control rather than derived: 46 degrees of azimuth, 31.5 of elevation, 241 out. The side is not a free choice -- the HUD boards are drawn on a y slice, so screen-right has to run along +x or their legends read backwards -- but the amount of swing is, and at 46 degrees the boards sit at a 29 degree tilt and are foreshortened to about seven tenths of their length. That is the trade this angle makes for showing both flanks of the island. Note the framing is deliberately tight: at fov 37 the slab's left corner falls about a tenth of a frame outside the left edge and the near corner grazes the bottom. fov 41 would contain the whole slab if that is ever wanted. Any of this can be overridden per-run with ?cam=x,y,z&tgt=x,y,z&fov=n, or turned with the mouse and kept with the lock-view box.",
   "camera": {
-    "pos": [11, 248, -60],
+    "pos": [-75, 218, -80],
     "target": [74, 76, 46],
     "fov": 37
   },

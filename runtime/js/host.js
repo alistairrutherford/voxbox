@@ -748,6 +748,8 @@ async function boot() {
     () => playCart('/carts/tempest.lua'));
   $('#pick-deeper').addEventListener('click',
     () => playCart('/carts/deeper.lua'));
+  $('#pick-bunny').addEventListener('click',
+    () => playCart('/carts/voxel-killer-bunny.lua'));
 
   addEventListener('dragover', (e) => {
     e.preventDefault();
